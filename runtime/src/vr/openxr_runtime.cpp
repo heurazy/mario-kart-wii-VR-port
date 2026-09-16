@@ -7,6 +7,7 @@
 
 #include "vr/openxr_runtime.h"
 #include "vr/mkw_vr_policy.h"
+#include "vr/openxr_android.h"
 #include "vr/quest_input.h"
 
 #include <algorithm>
@@ -106,6 +107,15 @@ bool OpenXRRuntime::Initialize(const OpenXRConfig& config) {
                     "resolution_scale must be finite and greater than zero");
     }
 
+    // On Android the loader is unusable - including the extension enumeration
+    // below - until it has been handed the process's JavaVM and Activity. On
+    // every other platform this succeeds without doing anything.
+    std::string loader_error;
+    if (!OpenXRAndroidInitializeLoader(&loader_error)) {
+        return Fail(XR_ERROR_INITIALIZATION_FAILED, "xrInitializeLoaderKHR",
+                    loader_error);
+    }
+
     m_config = config;
     if (!EnumerateInstanceCapabilities() || !CreateInstance() ||
         !InitializeSystem() || !EnumerateViewConfiguration() ||
@@ -183,13 +193,25 @@ void OpenXRRuntime::RequestDisplayRefreshRate(float hz) {
     if (XR_FAILED(enumerate(m_session, 0, &count, nullptr)) || count == 0) return;
     std::vector<float> rates(count);
     if (XR_FAILED(enumerate(m_session, count, &count, rates.data()))) return;
-    if (std::find(rates.begin(), rates.end(), hz) == rates.end()) {
-        Log(OpenXRLogLevel::Info, "Requested refresh is not exposed by the current runtime; retaining its refresh rate");
+    // A standalone headset advertises a fixed set of panel rates and rejects
+    // anything else, so an unavailable preference is resolved to the nearest
+    // rate at or below it rather than abandoned. That also lets hz = 0 mean
+    // "use this headset's default", which is what the standalone target wants
+    // before the user has expressed a preference.
+    const float selected = QuestSelectRefreshRate(rates.data(), rates.size(),
+                                                  m_device_profile, hz);
+    if (selected <= 0.0f) {
+        Log(OpenXRLogLevel::Info, "The runtime advertises no display refresh rates; retaining its refresh rate");
         return;
     }
-    const auto result = request(m_session, hz);
+    if (hz > 0.0f && selected != hz) {
+        Log(OpenXRLogLevel::Info,
+            "Requested " + std::to_string(hz) + " Hz is not exposed by this headset; using " +
+                std::to_string(selected) + " Hz");
+    }
+    const auto result = request(m_session, selected);
     Log(XR_SUCCEEDED(result) ? OpenXRLogLevel::Info : OpenXRLogLevel::Warning,
-        XR_SUCCEEDED(result) ? "Requested display refresh: " + std::to_string(hz) + " Hz" : "The runtime rejected the refresh request");
+        XR_SUCCEEDED(result) ? "Requested display refresh: " + std::to_string(selected) + " Hz" : "The runtime rejected the refresh request");
 }
 
 bool OpenXRRuntime::CreateInstance() {
@@ -201,6 +223,26 @@ bool OpenXRRuntime::CreateInstance() {
     }
     if (Contains(m_available_extensions, std::string(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME))) {
         m_enabled_extensions.emplace_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+    }
+    // The Android instance-creation extension is a property of the platform,
+    // not of the graphics backend, so it is added here rather than being left
+    // to every caller that builds an OpenXRConfig. Both lists are empty on a
+    // desktop build.
+    for (const std::string& extension : OpenXRAndroidRequiredExtensions()) {
+        if (!Contains(m_available_extensions, extension)) {
+            return Fail(XR_ERROR_EXTENSION_NOT_PRESENT, "xrCreateInstance",
+                        "the Android OpenXR loader does not advertise the "
+                        "required extension: " + extension);
+        }
+        if (!Contains(m_enabled_extensions, extension)) {
+            m_enabled_extensions.push_back(extension);
+        }
+    }
+    for (const std::string& extension : OpenXRAndroidOptionalExtensions()) {
+        if (Contains(m_available_extensions, extension) &&
+            !Contains(m_enabled_extensions, extension)) {
+            m_enabled_extensions.push_back(extension);
+        }
     }
     for (const std::string& extension : m_config.required_extensions) {
         if (!Contains(m_available_extensions, extension)) {
@@ -247,6 +289,10 @@ bool OpenXRRuntime::CreateInstance() {
     }
 
     XrInstanceCreateInfo create_info{XR_TYPE_INSTANCE_CREATE_INFO};
+    // Android needs the JavaVM/Activity pair a second time here. The pointee
+    // has static storage duration; nullptr on every other platform leaves the
+    // chain exactly as it was.
+    create_info.next = OpenXRAndroidInstanceCreateInfoChain();
     CopyOpenXRName(create_info.applicationInfo.applicationName,
                    XR_MAX_APPLICATION_NAME_SIZE, m_config.application_name);
     create_info.applicationInfo.applicationVersion = m_config.application_version;
@@ -420,9 +466,41 @@ bool OpenXRRuntime::CreateSession(const void* graphics_binding) {
     }
     m_session_state = XR_SESSION_STATE_UNKNOWN;
     m_exit_requested = false;
+    ApplyStandaloneDeviceProfile();
     Log(OpenXRLogLevel::Info,
         "OpenXR session created; waiting for the runtime READY event");
     return true;
+}
+
+const QuestDeviceProfile& OpenXRRuntime::DeviceProfile() const {
+    return m_device_profile;
+}
+
+void OpenXRRuntime::ApplyStandaloneDeviceProfile() {
+    // The profile is resolved on every platform so the diagnostics tab can name
+    // the headset, but only a standalone build owns the governor: on a tethered
+    // session the CPU/GPU levels belong to the streaming compositor.
+    m_device_profile = QuestProfileFromSystemName(m_runtime_info.system_name,
+                                                  OpenXRAndroidTransport());
+
+    std::ostringstream detected;
+    detected << "VR device profile: " << m_device_profile.display_name
+             << (m_device_profile.recognized ? "" : " (unrecognized; using "
+                                                    "conservative defaults)");
+    Log(OpenXRLogLevel::Info, detected.str());
+
+    if (!OpenXRAndroidIsStandaloneBuild()) {
+        return;
+    }
+
+    std::string error;
+    if (!OpenXRAndroidApplyPerformanceLevels(m_instance, m_session,
+                                             m_device_profile, &error)) {
+        // Not fatal: the runtime keeps its own governor behaviour and the game
+        // still renders, just with less headroom.
+        Log(OpenXRLogLevel::Warning,
+            "Could not raise the headset performance levels: " + error);
+    }
 }
 
 bool OpenXRRuntime::CreateControllerActions() {

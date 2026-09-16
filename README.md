@@ -36,8 +36,10 @@ clean PAL `RMCP01` disc image and compile the game locally.
 ## Requirements
 
 - Windows 10 or 11, 64-bit.
-- SteamVR installed and running. The VR executable selects SteamVR's OpenXR runtime for its process;
-  start SteamVR and connect the headset before launching the game.
+- An OpenXR runtime and a connected headset. On a Quest that means Quest Link or Air Link (the
+  Meta desktop app), Virtual Desktop, or SteamVR - whichever you already use. The game uses
+  whatever runtime you have made active and no longer requires SteamVR specifically; set
+  `[vr] runtime` in `Config.toml` to force a particular one.
 - A D3D12-capable GPU and a driver accepted by SteamVR, OpenXR, and Dawn. GTX 1650 / RX 6400 /
   Arc A310 or better is a practical starting point.
 - About 20 GB free while installing and compiling. The compiled game is about 5 GB, excluding
@@ -70,6 +72,21 @@ preserving personal and compiled game data.
 
 No release contains a ROM or a translated game executable. Compilation is intentionally performed
 locally from the disc image you select.
+
+## Running on a Meta Quest
+
+There are two ways a Quest can run this port, and they are at very different
+stages:
+
+- **Tethered (works today).** Quest 2/3/Pro/3S connected to a Windows PC over
+  Quest Link, Air Link or Virtual Desktop, running the Windows build described
+  above. This is the supported path, and it needs no SteamVR: the game uses
+  whichever OpenXR runtime you have active.
+- **Standalone on the headset (not yet runnable).** A native Android/arm64 build
+  with no PC. The platform, OpenXR and packaging layers are implemented and
+  cross-compile, but it does not render on a device yet. See
+  [QUEST.md](QUEST.md) for exactly what is done, what is blocked, and how to
+  build it.
 
 ## Quest and OpenXR controls
 
@@ -148,9 +165,11 @@ compilation from the same clean PAL image.
 
 ## Troubleshooting
 
-- **The headset stays on the desktop mirror:** start SteamVR first, check that it is the active
-  OpenXR runtime, and restart the game. `required = false` falls back to desktop mode when OpenXR
-  cannot create a session.
+- **The headset stays on the desktop mirror:** start your runtime first (the Meta desktop app for
+  Quest Link/Air Link, the Virtual Desktop streamer, or SteamVR), connect the headset, and restart
+  the game. `required = false` falls back to desktop mode when OpenXR cannot create a session. The
+  run log names the runtime that was selected; `[vr] runtime = "meta"`, `"virtualdesktop"`,
+  `"steamvr"` or `"system"` forces the choice.
 - **The game is not visible in WheelWizard:** run the copied setup from the installation folder,
   select the clean PAL `RMCP01` image, and let the local compilation finish.
 - **The wheel is difficult to grab:** use **VR settings > Driving** to increase acquisition depth
@@ -174,7 +193,8 @@ powershell -ExecutionPolicy Bypass -File Launcher/Build-Portable.ps1 `
 
 The build boundary deliberately excludes translated game code and game data from Git and releases.
 See [OPENXR.md](OPENXR.md) for the implementation details, configuration keys, controller profiles,
-and validation notes.
+and validation notes, and [QUEST.md](QUEST.md) for the standalone Meta Quest
+(Android) target and `Launcher/Build-Quest.sh`.
 
 ## Credits
 - **[Wiicompiled VR](https://github.com/iChris4/Wiicompiled_VR)** by Ichris4, all the openxr render system was taken from his project 

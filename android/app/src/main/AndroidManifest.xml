@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Standalone Meta Quest package for the Mario Kart Wii VR port.
+
+  The application is a pure NativeActivity: there is no Java/Kotlin code. The
+  Android runtime loads libmkwquest.so and calls ANativeActivity_onCreate,
+  which is implemented in runtime/src/platform/android/quest_entry_point.cpp.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Required for a headset application; the Quest launcher filters on it. -->
+    <uses-feature
+        android:name="android.hardware.vr.headtracking"
+        android:required="true"
+        android:version="1" />
+
+    <!-- Tracked controllers are the only supported input; hand tracking is
+         used solely for the optional hand mesh in the cockpit, so it must not
+         be required or the package is rejected on devices with it disabled. -->
+    <uses-feature
+        android:name="oculus.software.handtracking"
+        android:required="false" />
+    <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
+
+    <!-- The game is compiled on a PC and pushed to the headset's app-scoped
+         external directory, which needs no storage permission. The permission
+         is deliberately absent so the package cannot read anything else. -->
+
+    <application
+        android:allowBackup="false"
+        android:hasCode="false"
+        android:label="Mario Kart Wii VR"
+        android:extractNativeLibs="false">
+
+        <!-- Quest device targeting. Quest 1 is not listed: its Snapdragon 835
+             cannot run a statically recompiled Wii title in stereo. -->
+        <meta-data
+            android:name="com.oculus.supportedDevices"
+            android:value="quest2|questpro|quest3|quest3s" />
+
+        <!-- Declares the app as an immersive VR experience rather than a 2D
+             panel app in the Quest shell. -->
+        <meta-data
+            android:name="com.oculus.vr.focusaware"
+            android:value="true" />
+
+        <activity
+            android:name="android.app.NativeActivity"
+            android:label="Mario Kart Wii VR"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:excludeFromRecents="false"
+            android:configChanges="screenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation|uiMode|density"
+            android:exported="true">
+
+            <!-- Must match OUTPUT_NAME in runtime/cmake/PublicProducts.cmake. -->
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="mkwquest" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <!-- The VR category is what puts the app in the headset's
+                     immersive library instead of the 2D panel list. LAUNCHER is
+                     kept so it is also reachable over adb and from the
+                     "Unknown sources" list while sideloading. -->
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -87,10 +87,15 @@ if(MKW_ENABLE_OPENXR)
 endif()
 if(MKW_PLATFORM_WINDOWS)
     target_link_libraries(mkw_runtime_common PRIVATE shell32 windowsapp)
-elseif(MKW_PLATFORM_LINUX)
+elseif(MKW_PLATFORM_POSIX)
     # ${CMAKE_DL_LIBS} for music_attenuation.cpp's dlopen of libdbus-1 (MPRIS
-    # media monitoring). Empty string on glibc >= 2.34 where dl* is in libc.
+    # media monitoring). Empty string on glibc >= 2.34 where dl* is in libc, and
+    # on bionic, where it has always been. Android additionally needs liblog for
+    # the logcat sink and libandroid for the asset manager.
     target_link_libraries(mkw_runtime_common PRIVATE mkw::libco ${CMAKE_DL_LIBS})
+    if(MKW_PLATFORM_ANDROID)
+        target_link_libraries(mkw_runtime_common PRIVATE log android)
+    endif()
 endif()
 if(MKW_CPPWINRT_INCLUDE_DIR)
     if(NOT EXISTS "${MKW_CPPWINRT_INCLUDE_DIR}/winrt/base.h")
@@ -234,7 +239,7 @@ function(mkw_configure_product target)
             dbghelp user32 winmm ws2_32 iphlpapi secur32 crypt32 windowsapp)
 
         set_target_properties(${target} PROPERTIES WIN32_EXECUTABLE TRUE)
-    elseif(MKW_PLATFORM_LINUX)
+    elseif(MKW_PLATFORM_POSIX)
         # mkw_runtime_common is an OBJECT library: WiiCompiled/RetroRewind only pull in its .o
         # files via $<TARGET_OBJECTS:>, which does not propagate mkw_runtime_common's own
         # target_link_libraries (object libraries don't carry usage requirements to a consumer
@@ -244,6 +249,9 @@ function(mkw_configure_product target)
         # here for the same reason: music_attenuation.cpp's dlopen(libdbus-1) lives in those
         # objects (empty string on glibc >= 2.34, where dl* is in libc).
         target_link_libraries(${target} PRIVATE mkw::libco ${CMAKE_DL_LIBS})
+        if(MKW_PLATFORM_ANDROID)
+            target_link_libraries(${target} PRIVATE log android)
+        endif()
     endif()
     if(MKW_PLATFORM_WINDOWS)
         foreach(runtime_dll libc++.dll libunwind.dll)
@@ -296,7 +304,18 @@ function(mkw_configure_product target)
         "$<TARGET_FILE_DIR:${target}>/initial_pipeline_cache.db")
 endfunction()
 
-add_executable(WiiCompiled "${MKW_BASE_PRODUCT_SOURCE}" ${MKW_BASE_REGISTRATION_SOURCES})
+# On Android the product is loaded by the Android runtime through
+# System.loadLibrary, so it must be a shared object rather than an executable;
+# runtime/src/platform/android/quest_entry_point.cpp provides its ANativeActivity
+# entry point. Everything else about the target is identical.
+if(MKW_PLATFORM_ANDROID)
+    add_library(WiiCompiled SHARED "${MKW_BASE_PRODUCT_SOURCE}" ${MKW_BASE_REGISTRATION_SOURCES}
+        "${MKW_RUNTIME_SOURCE_DIR}/src/platform/android/quest_entry_point.cpp")
+    # The Gradle project expects libmkwquest.so inside jniLibs/arm64-v8a.
+    set_target_properties(WiiCompiled PROPERTIES OUTPUT_NAME "mkwquest")
+else()
+    add_executable(WiiCompiled "${MKW_BASE_PRODUCT_SOURCE}" ${MKW_BASE_REGISTRATION_SOURCES})
+endif()
 mkw_configure_product(WiiCompiled)
 target_precompile_headers(WiiCompiled PRIVATE
     "${MKW_RUNTIME_SOURCE_DIR}/include/mkw_pch.h")
@@ -322,10 +341,18 @@ else()
 endif()
 
 # Windows and Linux x86_64 share the x86-64-v3 floor that the CPU baseline
-# object above checks. AArch64 builds are compiled locally for the host that
-# will run them, so both Linux and Apple Silicon use the compiler's native CPU
-# tuning rather than leaving target-specific performance on the table.
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|X86_64)$")
+# object above checks. Native AArch64 builds are compiled locally for the host
+# that will run them, so both Linux and Apple Silicon use the compiler's native
+# CPU tuning rather than leaving target-specific performance on the table.
+#
+# The Quest target is the one AArch64 build that is cross-compiled, so
+# -mcpu=native would describe the build machine instead of the headset. Every
+# Quest SoC (XR2 Gen 1 in Quest 2/Pro, XR2 Gen 2 in Quest 3/3S) implements
+# ARMv8.2-A with FP16 and dot product, so that is the explicit floor; it also
+# keeps one binary valid across the whole supported device range.
+if(MKW_PLATFORM_ANDROID)
+    set(MKW_BASELINE_ARCH_FLAG -march=armv8.2-a+fp16+dotprod)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|X86_64)$")
     set(MKW_BASELINE_ARCH_FLAG -march=x86-64-v3)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
     set(MKW_BASELINE_ARCH_FLAG -mcpu=native)

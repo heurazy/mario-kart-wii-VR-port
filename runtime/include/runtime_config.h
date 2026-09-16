@@ -58,6 +58,10 @@ struct RuntimeUserConfig {
     std::optional<uint32_t> disabledPostProcessingPaths;
     std::optional<bool> vrEnabled;
     std::optional<bool> vrRequired;
+    // Which OpenXR runtime to use: auto (default; whatever the user has made
+    // active), meta, virtualdesktop, steamvr, or system. See
+    // vr/openxr_runtime_selection.h.
+    std::optional<std::string> vrRuntime;
     std::optional<bool> vrAsyncPresentation;
     std::optional<float> vrRenderScale;
     std::optional<float> vrStickDeadzone, vrStickOuter, vrStickCenterX, vrStickCenterY;
@@ -514,6 +518,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
 
     config.vrEnabled = FindConfigValue<bool>(document, "vr", "enabled");
     config.vrRequired = FindConfigValue<bool>(document, "vr", "required");
+    config.vrRuntime = FindConfigValue<std::string>(document, "vr", "runtime");
     config.vrAsyncPresentation = FindConfigValue<bool>(document, "vr", "async_presentation");
     config.vrStickDeadzone = FindConfigFloat(document, "vr", "stick_deadzone");
     config.vrStickOuter = FindConfigFloat(document, "vr", "stick_outer");
@@ -1160,6 +1165,10 @@ inline uint32_t DisabledPostProcessingPaths(uint32_t fallback = 0) {
 
 inline bool VrEnabled(bool fallback = false) {
     return Get().vrEnabled.value_or(fallback);
+}
+
+inline std::string VrRuntime(const std::string& fallback = "auto") {
+    return Get().vrRuntime.value_or(fallback);
 }
 
 inline bool VrRequired(bool fallback = false) {

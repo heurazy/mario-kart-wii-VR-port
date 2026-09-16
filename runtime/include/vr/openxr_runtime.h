@@ -4,6 +4,7 @@
 
 #include "vr/openxr_config.h"
 #include "vr/openxr_controller_profiles.h"
+#include "vr/quest_device_profile.h"
 #include "vr/vr_controls.h"
 #include "vr/quest_input.h"
 
@@ -171,6 +172,11 @@ public:
 
     // Called only on the XR owner thread, at the predicted display time.
     void PollControllers(XrTime time);
+    // Asks the runtime for a display refresh rate. `hz` is the user's
+    // preference, or 0 to take the device profile's default. The request is
+    // resolved against the rates the runtime actually advertises (see
+    // QuestSelectRefreshRate), because XR_FB_display_refresh_rate rejects any
+    // other value.
     void RequestDisplayRefreshRate(float hz);
     void PulseGrip(size_t hand, bool grabbed);
     bool ConsumeCameraClick() { const bool click = m_camera_clicked; m_camera_clicked = false; return click; }
@@ -209,6 +215,11 @@ public:
 
     const OpenXRConfig& Config() const { return m_config; }
     const OpenXRRuntimeInfo& RuntimeInfo() const { return m_runtime_info; }
+
+    // Per-headset defaults resolved from the OpenXR system name when the
+    // session was created. Valid on every platform; only a standalone build
+    // acts on the performance-level and foveation fields.
+    const QuestDeviceProfile& DeviceProfile() const;
     const std::array<OpenXRViewConfiguration, kOpenXREyeCount>& ViewConfiguration() const {
         return m_view_configuration;
     }
@@ -226,6 +237,10 @@ public:
     const OpenXRError& LastError() const { return m_last_error; }
 
 private:
+    // Resolves m_device_profile from the system name and, on a standalone
+    // build, applies the performance levels it asks for.
+    void ApplyStandaloneDeviceProfile();
+
     bool m_panel_anchored = false;
     XrTime m_panel_tracking_since = 0;
     XrPosef m_panel_origin{{0,0,0,1},{0,0,0}};
@@ -312,6 +327,7 @@ private:
     XrTime m_active_frame_display_time = 0;
 
     OpenXRRuntimeInfo m_runtime_info;
+    QuestDeviceProfile m_device_profile;
     std::array<OpenXRViewConfiguration, kOpenXREyeCount> m_view_configuration{};
     std::vector<std::string> m_available_extensions;
     std::vector<std::string> m_available_api_layers;

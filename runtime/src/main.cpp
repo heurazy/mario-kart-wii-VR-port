@@ -67,6 +67,7 @@
 #include "runtime_product.h"
 #include "recomp_mod_loader.h"
 #include "vr/openxr_integration.h"
+#include "vr/openxr_runtime_selection.h"
 #include <aurora/aurora.h>
 #include <aurora/gfx.h>
 #include <dolphin/gx/GXAurora.h>
@@ -1304,43 +1305,119 @@ static void TerminateHandler() {
 }
 
 #if defined(_WIN32)
-void SelectSteamVROpenXRForProcess() {
-    std::vector<std::filesystem::path> candidates;
-    wchar_t registered[32768]{};DWORD bytes=sizeof(registered);
-    if(RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\Khronos\\OpenXR\\1",L"ActiveRuntime",
-        RRF_RT_REG_SZ,nullptr,registered,&bytes)==ERROR_SUCCESS) {
-        std::filesystem::path path(registered);
-        if(path.filename()==L"steamxr_win64.json") candidates.push_back(path);
+// Collects the OpenXR runtimes installed on this machine. Discovery only; the
+// choice between them is vr/openxr_runtime_selection.h, which is unit-tested.
+std::vector<mkw::vr::OpenXRRuntimeCandidate> DiscoverOpenXRRuntimes(bool& system_default_present) {
+    using mkw::vr::OpenXRRuntimeCandidate;
+    using mkw::vr::OpenXRRuntimeKind;
+    std::vector<OpenXRRuntimeCandidate> candidates;
+
+    const auto exists = [](const std::filesystem::path& path) {
+        std::error_code ec;
+        return std::filesystem::is_regular_file(path, ec);
+    };
+    const auto add = [&](OpenXRRuntimeKind kind, const std::filesystem::path& path) {
+        if (!exists(path)) return;
+        const auto utf8 = RuntimeConfigFile::PathToUtf8(path);
+        for (const auto& candidate : candidates) {
+            if (candidate.kind == kind) return;
+        }
+        candidates.push_back({kind, utf8});
+    };
+    const auto registryString = [](HKEY root, const wchar_t* key, const wchar_t* value,
+                                   std::wstring& out) {
+        wchar_t buffer[32768]{};
+        DWORD bytes = sizeof(buffer);
+        if (RegGetValueW(root, key, value, RRF_RT_REG_SZ, nullptr, buffer, &bytes) !=
+            ERROR_SUCCESS) {
+            return false;
+        }
+        out.assign(buffer);
+        return !out.empty();
+    };
+
+    // Whether the user has an active runtime configured at all. This is what
+    // "auto" respects, and it is how Quest Link, Virtual Desktop, SteamVR and
+    // anything else the user has chosen all work without configuration.
+    std::wstring active;
+    system_default_present =
+        registryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Khronos\\OpenXR\\1", L"ActiveRuntime",
+                       active) &&
+        exists(std::filesystem::path(active));
+
+    // Meta: the PC runtime behind Quest Link and Air Link. The install path is
+    // recorded by the Oculus desktop app; fall back to the default location.
+    std::wstring oculusBase;
+    if (registryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Oculus VR, LLC\\Oculus", L"Base",
+                       oculusBase)) {
+        add(OpenXRRuntimeKind::Meta,
+            std::filesystem::path(oculusBase) / L"Support/oculus-runtime/oculus_openxr_64.json");
     }
-    wchar_t steam[32768]{};bytes=sizeof(steam);
-    if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamPath",
-        RRF_RT_REG_SZ,nullptr,steam,&bytes)==ERROR_SUCCESS) {
+    if (const char* programFiles = std::getenv("ProgramFiles"); programFiles && *programFiles) {
+        add(OpenXRRuntimeKind::Meta, std::filesystem::path(programFiles) /
+                                         "Oculus/Support/oculus-runtime/oculus_openxr_64.json");
+        add(OpenXRRuntimeKind::VirtualDesktop,
+            std::filesystem::path(programFiles) /
+                "Virtual Desktop Streamer/OpenXR/virtualdesktop-openxr-64.json");
+    }
+
+    // SteamVR, including a secondary Steam library.
+    std::wstring steam;
+    if (registryString(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath", steam)) {
         const std::filesystem::path root(steam);
-        candidates.push_back(root/L"steamapps/common/SteamVR/steamxr_win64.json");
-        // SteamVR can be installed in a secondary Steam library.
-        std::ifstream libraries(root/L"steamapps/libraryfolders.vdf");
+        add(OpenXRRuntimeKind::SteamVR, root / L"steamapps/common/SteamVR/steamxr_win64.json");
+        std::ifstream libraries(root / L"steamapps/libraryfolders.vdf");
         std::string line;
-        while(std::getline(libraries,line)) {
-            const auto key=line.find("\"path\"");if(key==std::string::npos) continue;
-            const auto begin=line.find('"',key+6);
-            const auto end=begin==std::string::npos?begin:line.find('"',begin+1);
-            if(begin==std::string::npos || end==std::string::npos) continue;
-            std::string directory=line.substr(begin+1,end-begin-1);
-            for(size_t pos=0;(pos=directory.find("\\\\",pos))!=std::string::npos;) directory.erase(pos,1);
-            candidates.push_back(std::filesystem::u8path(directory)/L"steamapps/common/SteamVR/steamxr_win64.json");
+        while (std::getline(libraries, line)) {
+            const auto key = line.find("\"path\"");
+            if (key == std::string::npos) continue;
+            const auto begin = line.find('"', key + 6);
+            const auto stop = begin == std::string::npos ? begin : line.find('"', begin + 1);
+            if (begin == std::string::npos || stop == std::string::npos) continue;
+            std::string directory = line.substr(begin + 1, stop - begin - 1);
+            for (size_t pos = 0; (pos = directory.find("\\\\", pos)) != std::string::npos;)
+                directory.erase(pos, 1);
+            add(OpenXRRuntimeKind::SteamVR,
+                std::filesystem::u8path(directory) / "steamapps/common/SteamVR/steamxr_win64.json");
         }
     }
-    for(const auto& path:candidates) {
-        std::error_code ec;
-        if(!std::filesystem::is_regular_file(path,ec)) continue;
-        if(_wputenv_s(L"XR_RUNTIME_JSON",path.c_str())!=0 ||
-            !SetEnvironmentVariableW(L"XR_RUNTIME_JSON",path.c_str()))
-            throw std::runtime_error("Could not select the SteamVR OpenXR runtime.");
-        RuntimeConfigFile::Mutable().vrRequired=true;
-        RT_LOG(RT_TAG_RUNTIME) << "OpenXR: SteamVR selected for this process: " << path << std::endl;
+    return candidates;
+}
+
+// Points this process at an OpenXR runtime. Never throws: a machine with no
+// usable runtime runs on the desktop mirror, which is what `[vr] required`
+// already governs. The old behaviour - demanding SteamVR and aborting without
+// it - made Quest Link and Virtual Desktop users unable to start at all.
+void SelectOpenXRRuntimeForProcess() {
+    bool system_default_present = false;
+    const auto candidates = DiscoverOpenXRRuntimes(system_default_present);
+    const std::string preference = RuntimeConfigFile::VrRuntime("auto");
+    const auto selection =
+        mkw::vr::SelectOpenXRRuntime(candidates, preference, system_default_present);
+
+    if (!selection.downgrade_reason.empty()) {
+        RT_LOG(RT_TAG_RUNTIME) << "OpenXR: " << selection.downgrade_reason << std::endl;
+    }
+    if (selection.manifest_path.empty()) {
+        RT_LOG(RT_TAG_RUNTIME)
+            << "OpenXR: using " << mkw::vr::OpenXRRuntimeKindName(selection.kind) << std::endl;
         return;
     }
-    throw std::runtime_error("SteamVR is required for VR mode. Install SteamVR in Steam, connect your headset, and launch the game again.");
+
+    const std::filesystem::path manifest = std::filesystem::u8path(selection.manifest_path);
+    const std::wstring native = manifest.wstring();
+    if (_wputenv_s(L"XR_RUNTIME_JSON", native.c_str()) != 0 ||
+        !SetEnvironmentVariableW(L"XR_RUNTIME_JSON", native.c_str())) {
+        // Not fatal: without the override the loader still uses the active
+        // runtime, which is very often the same one.
+        RT_LOG(RT_TAG_RUNTIME)
+            << "OpenXR: could not select " << mkw::vr::OpenXRRuntimeKindName(selection.kind)
+            << " for this process; continuing with the system default" << std::endl;
+        return;
+    }
+    RT_LOG(RT_TAG_RUNTIME) << "OpenXR: selected "
+                           << mkw::vr::OpenXRRuntimeKindName(selection.kind) << " for this process: "
+                           << selection.manifest_path << std::endl;
 }
 
 void ConfigureVirtualDesktopOpenXRLayerForProcess() {
@@ -1498,7 +1575,7 @@ int RuntimeMain(int argc, char** argv) {
         if(introPreview) { RuntimeConfigFile::Mutable().vrEnabled=false;RuntimeConfigFile::Mutable().vrRequired=false; }
 #if defined(_WIN32)
         if (RuntimeConfigFile::VrEnabled(false)) {
-            SelectSteamVROpenXRForProcess();
+            SelectOpenXRRuntimeForProcess();
             ConfigureVirtualDesktopOpenXRLayerForProcess();
         }
 #endif

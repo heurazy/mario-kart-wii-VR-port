@@ -17,6 +17,10 @@
 #include <pwd.h>
 #endif
 
+#if defined(__ANDROID__)
+#include "platform/android_app.h"
+#endif
+
 namespace RuntimePlatform {
 
 std::optional<std::filesystem::path> ExecutableDirectory() noexcept {
@@ -65,6 +69,19 @@ std::filesystem::path ApplicationDataDirectory(std::string_view applicationName)
     }
     if (const passwd* user = getpwuid(getuid()); user && user->pw_dir && *user->pw_dir) {
         return std::filesystem::path(user->pw_dir) / "Library" / "Application Support" / applicationName;
+    }
+#elif defined(__ANDROID__)
+    // An Android process has no meaningful current working directory (it is "/"
+    // and is not writable), so the desktop fallback below would silently produce
+    // an unusable path. Private app storage is the only location guaranteed to
+    // exist and be writable, and the application name is already implied by the
+    // package, so it is not appended a second time.
+    if (Android::HasAppContext()) {
+        const auto& internal = Android::GetAppContext().internal_data_path;
+        if (!internal.empty()) {
+            (void)applicationName;
+            return internal;
+        }
     }
 #endif
     return std::filesystem::current_path() / applicationName;

@@ -43,6 +43,8 @@ endfunction()
 set(_aurora_dawn_provider "${AURORA_DAWN_PROVIDER}")
 if (_aurora_dawn_provider STREQUAL "auto")
   # Prebuilt Dawn packages available for: windows-{amd64,arm64}, linux-{x86_64,aarch64}, darwin-{arm64,x86_64}
+  # Android (the standalone Quest target) has no prebuilt and always falls
+  # through to the vendored source build below.
   set(_has_package FALSE)
   if (WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|x86_64|ARM64|aarch64)$")
     set(_has_package TRUE)
@@ -89,6 +91,15 @@ if (_aurora_dawn_provider STREQUAL "vendor")
       "Use fetch_dawn_dependencies.py as an alternative to using depot_tools")
     if (CMAKE_SYSTEM_NAME STREQUAL Linux)
       set(DAWN_USE_WAYLAND ON CACHE INTERNAL "Enable support for Wayland surface")
+    elseif (CMAKE_SYSTEM_NAME STREQUAL Android)
+      # Android is a Linux kernel without X11 or Wayland. Dawn's desktop surface
+      # support probes for both and fails the configure when it finds neither,
+      # so they are turned off explicitly rather than left to detection.
+      # Vulkan is the only backend on this target and it presents through the
+      # OpenXR compositor, never through a window surface.
+      set(DAWN_USE_X11 OFF CACHE INTERNAL "Disable X11 surface support on Android")
+      set(DAWN_USE_WAYLAND OFF CACHE INTERNAL "Disable Wayland surface support on Android")
+      set(DAWN_USE_GLFW OFF CACHE INTERNAL "Disable GLFW on Android")
     endif ()
     set(TINT_BUILD_TESTS OFF CACHE INTERNAL "Build tests")
     set(TINT_BUILD_CMD_TOOLS OFF CACHE INTERNAL "Build the Tint command line tools")
@@ -98,10 +109,40 @@ if (_aurora_dawn_provider STREQUAL "vendor")
       set(ABSL_MSVC_STATIC_RUNTIME ON CACHE INTERNAL "Link static runtime libraries")
     endif ()
 
+    # OpenXR must be handed the same Vulkan device Dawn renders on, and Dawn's
+    # public VulkanBackend.h exposes only VkInstance. The patch publishes the
+    # physical device, device, queue and queue family that are already reachable
+    # internally; see the patch header for why this cannot be worked around from
+    # the outside. It is additive, so a Dawn revision that adopts these upstream
+    # will fail to apply loudly rather than silently building something else.
+    set(_aurora_dawn_patch
+      "${CMAKE_CURRENT_LIST_DIR}/patches/dawn-vulkan-native-handles.patch")
+    set(_aurora_dawn_patch_command "")
+    if (EXISTS "${_aurora_dawn_patch}")
+      find_package(Git QUIET)
+      if (GIT_FOUND)
+        # --reverse --check first: FetchContent re-runs PATCH_COMMAND on a
+        # re-configure against an already-patched tree, and a second apply would
+        # fail the build. Succeeding when it is already applied makes this
+        # idempotent.
+        set(_aurora_dawn_patch_command PATCH_COMMAND
+          ${CMAKE_COMMAND}
+            -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+            -DPATCH_FILE=${_aurora_dawn_patch}
+            -P "${CMAKE_CURRENT_LIST_DIR}/AuroraApplyPatch.cmake")
+      else ()
+        message(WARNING
+          "aurora: Git was not found, so the Dawn Vulkan native-handle patch "
+          "cannot be applied; OpenXR Vulkan interop will report "
+          "DawnNativeHandlesUnavailable")
+      endif ()
+    endif ()
+
     include(FetchContent)
     FetchContent_Declare(dawn
       URL "https://github.com/google/dawn/archive/refs/tags/${AURORA_DAWN_VERSION}.tar.gz"
       DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+      ${_aurora_dawn_patch_command}
       EXCLUDE_FROM_ALL
     )
     FetchContent_MakeAvailable(dawn)

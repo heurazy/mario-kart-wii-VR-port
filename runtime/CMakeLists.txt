@@ -11,11 +11,20 @@ elseif(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|ARM64)$")
     # The first native macOS target is Apple Silicon. Intel and universal
     # binaries remain future compatibility work; do not silently claim them.
     set(MKW_PLATFORM_MACOS TRUE)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Android" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+    # Standalone Meta Quest. Android is a Linux kernel with bionic, so the guest
+    # memory model, the libco fiber backend and the POSIX paths are shared with
+    # MKW_PLATFORM_LINUX; what differs is that there is no window system, no
+    # writable working directory, and the OpenXR loader must be handed the
+    # process JavaVM before use. See QUEST.md.
+    set(MKW_PLATFORM_ANDROID TRUE)
+    set(MKW_PLATFORM_POSIX TRUE)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|X86_64|aarch64|arm64|ARM64)$")
     set(MKW_PLATFORM_LINUX TRUE)
+    set(MKW_PLATFORM_POSIX TRUE)
 else()
     message(FATAL_ERROR
-        "WiiCompiled supports 64-bit LLVM-MinGW Clang on Windows, native Linux x86_64/aarch64, or Apple Clang on macOS arm64")
+        "WiiCompiled supports 64-bit LLVM-MinGW Clang on Windows, native Linux x86_64/aarch64, Android arm64 (Meta Quest), or Apple Clang on macOS arm64")
 endif()
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
     message(FATAL_ERROR "WiiCompiled only supports Release builds")
@@ -65,8 +74,9 @@ set_target_properties(mkw_pugixml PROPERTIES UNITY_BUILD OFF)
 # asymmetric resume/yield coroutine libraries, which would need every call site restructured).
 # Vendored from upstream (higan-emu/libco @ e18e09d, 2019-10-16, ISC license; valgrind.h is
 # separately BSD-style licensed, see third_party/libco/LICENSE). Windows keeps native Fibers
-# and macOS uses the project's x18-safe AArch64 assembly backend, so this target is Linux-only.
-if(MKW_PLATFORM_LINUX)
+# and macOS uses the project's x18-safe AArch64 assembly backend, so this target covers the
+# Linux and Android (Quest) targets, which share host_context.cpp's libco backend.
+if(MKW_PLATFORM_POSIX)
     add_library(mkw_libco STATIC third_party/libco/libco.c)
     add_library(mkw::libco ALIAS mkw_libco)
     target_include_directories(mkw_libco PUBLIC third_party/libco)
@@ -112,18 +122,25 @@ set(MKW_TRANSLATED_COMPILE_JOBS 0 CACHE STRING
 Scheduling only - never affects output bytes, so it is deliberately outside the canonical flag fingerprint.")
 set(MKW_CPPWINRT_INCLUDE_DIR "" CACHE PATH "Optional self-contained C++/WinRT include directory")
 
-# The functional backend is currently Windows D3D12, so only Windows defaults
-# to carrying the loader. Linux keeps the capability-gated Vulkan scaffold
+# The functional backend is currently Windows D3D12, so Windows defaults to
+# carrying the loader. Linux keeps the capability-gated Vulkan scaffold
 # available to explicit developer builds without making a nonfunctional SDK
-# fetch part of every normal build.
+# fetch part of every normal build. Android is the standalone Quest target,
+# where OpenXR is not optional: without it there is no display at all.
 set(MKW_ENABLE_OPENXR_DEFAULT OFF)
-if(MKW_PLATFORM_WINDOWS)
+if(MKW_PLATFORM_WINDOWS OR MKW_PLATFORM_ANDROID)
     set(MKW_ENABLE_OPENXR_DEFAULT ON)
 endif()
 option(MKW_ENABLE_OPENXR "Build OpenXR VR support" ${MKW_ENABLE_OPENXR_DEFAULT})
 unset(MKW_ENABLE_OPENXR_DEFAULT)
 set(MKW_OPENXR_SDK_DIR "" CACHE PATH
     "Optional OpenXR-SDK source tree; when empty, use a package or fetch the pinned SDK")
+# Meta ships the Quest loader as a prebuilt libopenxr_loader.so inside an AAR
+# (org.khronos.openxr:openxr_loader_for_android, or the Meta OpenXR Mobile SDK).
+# Building the Khronos loader from source for Android also works, but the
+# prebuilt is what Meta supports on-device, so it takes precedence when given.
+set(MKW_OPENXR_ANDROID_LOADER "" CACHE FILEPATH
+    "Prebuilt libopenxr_loader.so for the Quest target (from the OpenXR Android AAR)")
 
 # Precompiled aurora + third-party package (see launcher/Prepare-NativePrebuilt.ps1).
 # Empty - the default - keeps the from-source behaviour every developer build
@@ -250,9 +267,27 @@ endif()
 
 set(MKW_OPENXR_TARGET "")
 if(MKW_ENABLE_OPENXR)
-    if(NOT MKW_PLATFORM_WINDOWS AND NOT MKW_PLATFORM_LINUX)
+    if(NOT MKW_PLATFORM_WINDOWS AND NOT MKW_PLATFORM_LINUX AND NOT MKW_PLATFORM_ANDROID)
         message(WARNING "OpenXR is not wired for this platform; disabling MKW_ENABLE_OPENXR")
         set(MKW_ENABLE_OPENXR OFF)
+    elseif(MKW_PLATFORM_ANDROID AND MKW_OPENXR_ANDROID_LOADER)
+        # Prebuilt device loader. The headers still come from the pinned SDK so
+        # the extension set the runtime compiles against is the reviewed one,
+        # rather than whatever version the AAR happens to carry.
+        if(NOT EXISTS "${MKW_OPENXR_ANDROID_LOADER}")
+            message(FATAL_ERROR
+                "MKW_OPENXR_ANDROID_LOADER does not exist: ${MKW_OPENXR_ANDROID_LOADER}")
+        endif()
+        if(NOT MKW_OPENXR_SDK_DIR OR NOT EXISTS "${MKW_OPENXR_SDK_DIR}/include/openxr/openxr.h")
+            message(FATAL_ERROR
+                "MKW_OPENXR_ANDROID_LOADER also requires MKW_OPENXR_SDK_DIR for the matching headers")
+        endif()
+        add_library(mkw_openxr_android_loader SHARED IMPORTED)
+        set_target_properties(mkw_openxr_android_loader PROPERTIES
+            IMPORTED_LOCATION "${MKW_OPENXR_ANDROID_LOADER}"
+            INTERFACE_INCLUDE_DIRECTORIES "${MKW_OPENXR_SDK_DIR}/include")
+        set(MKW_OPENXR_TARGET mkw_openxr_android_loader)
+        add_compile_definitions(MKW_ENABLE_OPENXR=1)
     else()
         find_package(OpenXR CONFIG QUIET)
         if(NOT TARGET OpenXR::openxr_loader AND NOT TARGET openxr_loader)
@@ -310,6 +345,10 @@ if(MKW_PLATFORM_MACOS)
 else()
     list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_LIST_DIR}/src/guest_flat_memory_macos.cpp")
 endif()
+# Compiled into the Quest product target itself (see cmake/PublicProducts.cmake),
+# so it must not also land in the globbed runtime sources.
+list(REMOVE_ITEM SOURCES
+    "${CMAKE_CURRENT_LIST_DIR}/src/platform/android/quest_entry_point.cpp")
 set(MKW_PLATFORM_SOURCE "${CMAKE_CURRENT_LIST_DIR}/src/platform/host_platform.cpp")
 set(MKW_BASE_PRODUCT_SOURCE "${CMAKE_CURRENT_LIST_DIR}/src/product/base_product.cpp")
 set(MKW_RETRO_REWIND_PRODUCT_SOURCE "${CMAKE_CURRENT_LIST_DIR}/src/product/retro_rewind_product.cpp")
@@ -360,6 +399,27 @@ target_include_directories(mkw_steering_wheel_tests PRIVATE "${CMAKE_CURRENT_LIS
 target_compile_features(mkw_steering_wheel_tests PRIVATE cxx_std_20)
 add_test(NAME mkw_steering_wheel_tests COMMAND mkw_steering_wheel_tests)
 
+# Per-headset defaults for the standalone Quest target. Like the controller
+# profile table, this is deliberately free of OpenXR and Android headers so the
+# policy is checkable on the build machine, with no loader, SDK or device.
+add_executable(mkw_quest_device_profile_tests
+    "${CMAKE_CURRENT_LIST_DIR}/tests/quest_device_profile_tests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/vr/quest_device_profile.cpp")
+target_include_directories(mkw_quest_device_profile_tests PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/include")
+target_compile_features(mkw_quest_device_profile_tests PRIVATE cxx_std_17)
+add_test(NAME mkw_quest_device_profile_tests COMMAND mkw_quest_device_profile_tests)
+
+# Which OpenXR runtime a process uses. Pure policy, so the Quest Link / Virtual
+# Desktop / SteamVR decision is checkable without a headset or a registry.
+add_executable(mkw_openxr_runtime_selection_tests
+    "${CMAKE_CURRENT_LIST_DIR}/tests/openxr_runtime_selection_tests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/vr/openxr_runtime_selection.cpp")
+target_include_directories(mkw_openxr_runtime_selection_tests PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/include")
+target_compile_features(mkw_openxr_runtime_selection_tests PRIVATE cxx_std_17)
+add_test(NAME mkw_openxr_runtime_selection_tests COMMAND mkw_openxr_runtime_selection_tests)
+
 add_executable(mkw_openxr_controller_profiles_tests
     "${CMAKE_CURRENT_LIST_DIR}/tests/openxr_controller_profiles_tests.cpp")
 target_include_directories(mkw_openxr_controller_profiles_tests PRIVATE
@@ -383,9 +443,10 @@ add_test(NAME mkw_vr_settings_policy_tests COMMAND mkw_vr_settings_policy_tests)
 
 
 # HostContext deliberately keeps the platform-specific context primitive out
-# of fiber_manager.cpp. Exercise the Linux libco handoff directly so future
-# refactors cannot silently remove its headers, implementation, or link edge.
-if(MKW_PLATFORM_LINUX)
+# of fiber_manager.cpp. Exercise the libco handoff directly so future refactors
+# cannot silently remove its headers, implementation, or link edge. Android uses
+# the same backend, so it is covered by the same target.
+if(MKW_PLATFORM_POSIX)
     add_executable(mkw_linux_host_context_tests
         "${CMAKE_CURRENT_LIST_DIR}/tests/host_context_tests.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/src/host_context.cpp")

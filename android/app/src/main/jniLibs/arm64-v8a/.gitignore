@@ -1,0 +1,4 @@
+# Populated by Launcher/Build-Quest.sh. The native libraries are build output
+# (libmkwquest.so, libopenxr_loader.so, libc++_shared.so) and are never
+# committed; this file only keeps the directory present for Gradle.
+*.so

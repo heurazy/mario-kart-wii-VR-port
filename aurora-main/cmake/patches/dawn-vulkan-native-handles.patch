@@ -1,0 +1,87 @@
+Expose Dawn's Vulkan device, physical device, queue and queue family.
+
+OpenXR requires an application to submit its eye images on the SAME Vulkan
+device the compositor was told about at session creation. Aurora owns that
+device through Dawn, so the OpenXR backend cannot create its own: it has to
+borrow Dawn's.
+
+Dawn's public VulkanBackend.h exposes only VkInstance, which is not enough to
+fill XrGraphicsBindingVulkan2KHR. Every handle needed is already reachable
+internally (Device::GetVkDevice / GetGraphicsQueueFamily,
+PhysicalDevice::GetVkPhysicalDevice, Queue::GetVkQueue), and GetVkDevice is in
+fact already defined in VulkanBackend.cpp but never declared in the header.
+This publishes them, mirroring the D3D12 backend, which already exports both
+its device and its command queue through GetD3D12Device and
+GetD3D12CommandQueue.
+
+Additive and upstream-shaped: no existing declaration or behaviour changes.
+Applied to the vendored Dawn tree by aurora-main/cmake/AuroraDawnProvider.cmake
+when AURORA_DAWN_PROVIDER=vendor, which is the only configuration the
+standalone Quest target uses.
+
+diff --git a/include/dawn/native/VulkanBackend.h b/include/dawn/native/VulkanBackend.h
+index 355c4b864..a7816b8f8 100644
+--- a/include/dawn/native/VulkanBackend.h
++++ b/include/dawn/native/VulkanBackend.h
+@@ -39,6 +39,21 @@ namespace dawn::native::vulkan {
+ 
+ DAWN_NATIVE_EXPORT VkInstance GetInstance(WGPUDevice device);
+ 
++// The remaining handles that describe Dawn's Vulkan device to another API.
++// These mirror d3d12::GetD3D12Device/GetD3D12CommandQueue and exist for the
++// same reason: an interop client (here OpenXR) must use Dawn's own device and
++// queue rather than creating a second one.
++DAWN_NATIVE_EXPORT VkPhysicalDevice GetVkPhysicalDevice(WGPUDevice device);
++
++DAWN_NATIVE_EXPORT VkDevice GetVkDevice(WGPUDevice device);
++
++// The queue backing the device's default WGPUQueue.
++DAWN_NATIVE_EXPORT VkQueue GetVkQueue(WGPUDevice device);
++
++// The queue family GetVkQueue belongs to. Needed to create command pools whose
++// buffers can be submitted onto that queue.
++DAWN_NATIVE_EXPORT uint32_t GetGraphicsQueueFamily(WGPUDevice device);
++
+ DAWN_NATIVE_EXPORT PFN_vkVoidFunction GetInstanceProcAddr(WGPUDevice device, const char* pName);
+ 
+ enum class NeedsDedicatedAllocation {
+diff --git a/src/dawn/native/vulkan/VulkanBackend.cpp b/src/dawn/native/vulkan/VulkanBackend.cpp
+index 5e09cfe1f..f39068456 100644
+--- a/src/dawn/native/vulkan/VulkanBackend.cpp
++++ b/src/dawn/native/vulkan/VulkanBackend.cpp
+@@ -37,6 +37,8 @@
+ // Must be after vulkan_platform
+ #include "dawn/native/VulkanBackend.h"
+ #include "src/dawn/native/vulkan/DeviceVk.h"
++#include "src/dawn/native/vulkan/PhysicalDeviceVk.h"
++#include "src/dawn/native/vulkan/QueueVk.h"
+ #include "src/dawn/native/vulkan/TextureVk.h"
+ 
+ namespace dawn::native::vulkan {
+@@ -46,11 +48,26 @@ VkInstance GetInstance(WGPUDevice device) {
+     return backendDevice->GetVkInstance();
+ }
+ 
++VkPhysicalDevice GetVkPhysicalDevice(WGPUDevice device) {
++    Device* backendDevice = ToBackend(FromAPI(device));
++    return ToBackend(backendDevice->GetPhysicalDevice())->GetVkPhysicalDevice();
++}
++
+ VkDevice GetVkDevice(WGPUDevice device) {
+     Device* backendDevice = ToBackend(FromAPI(device));
+     return backendDevice->GetVkDevice();
+ }
+ 
++VkQueue GetVkQueue(WGPUDevice device) {
++    Device* backendDevice = ToBackend(FromAPI(device));
++    return ToBackend(backendDevice->GetQueue())->GetVkQueue();
++}
++
++uint32_t GetGraphicsQueueFamily(WGPUDevice device) {
++    Device* backendDevice = ToBackend(FromAPI(device));
++    return backendDevice->GetGraphicsQueueFamily();
++}
++
+ DAWN_NATIVE_EXPORT PFN_vkVoidFunction GetInstanceProcAddr(WGPUDevice device, const char* pName) {
+     Device* backendDevice = ToBackend(FromAPI(device));
+     return (*backendDevice->fn.GetInstanceProcAddr)(backendDevice->GetVkInstance(), pName);

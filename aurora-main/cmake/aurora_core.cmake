@@ -40,6 +40,16 @@ if (AURORA_ENABLE_GX)
     if (CMAKE_SYSTEM_NAME STREQUAL Windows)
         target_sources(aurora_core PRIVATE lib/webgpu/d3d12_interop.cpp)
     endif ()
+    # Vulkan counterpart, for the standalone Meta Quest target. Built on every
+    # Android GX build for the same reason as the D3D12 one above: the
+    # translation unit supplies the C ABI fallback stubs, so a runtime that
+    # cannot reach Dawn's Vulkan handles still links and reports the failure at
+    # runtime instead of producing unresolved interop references.
+    if (CMAKE_SYSTEM_NAME STREQUAL Android)
+        target_sources(aurora_core PRIVATE lib/webgpu/vulkan_interop.cpp)
+        # AHardwareBuffer_allocate/_release and the Vulkan loader.
+        target_link_libraries(aurora_core PRIVATE android)
+    endif ()
     target_link_libraries(aurora_core PRIVATE dawn::webgpu_dawn)
     if (DAWN_ENABLE_VULKAN)
         target_compile_definitions(aurora_core PRIVATE DAWN_ENABLE_BACKEND_VULKAN)
