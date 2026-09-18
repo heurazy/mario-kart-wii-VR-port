@@ -9,6 +9,21 @@ Nintendo code, game assets, a translated game executable, or a ROM. You must pro
 clean PAL `RMCP01` disc image and compile the game locally.
 
 [Download the latest release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/latest)
+## Roadmap
+- resolve upside-down screen for some users : in progress (pushed but not in a release or tested)
+- resolve freezes every 2 seconds for some users : in progress
+- sim racing steering wheel compatibility : in progress (pushed but not in a release or tested)
+- multiplayer: in progress
+- fix low FPS in menu : planned
+- new hand models : planned
+- fix character height : planned
+- fix black hand in front of HUD : planned
+- better motorcycle controls : planned
+- more vehicles visual steering wheel compatibility : planned
+- fix Bullet Bill gate vision : planned
+- option to move with the kart : planned
+- more control options : planned
+- throwing shells and other items option : planned
 
 ## What the port adds
 
