@@ -68,6 +68,11 @@ if (AURORA_ENABLE_GX)
 
   gtest_discover_tests(gx_fifo_tests)
   if(WIN32)
+    add_executable(output_orientation_gpu_test output_orientation_gpu_test.cpp)
+    target_compile_features(output_orientation_gpu_test PRIVATE cxx_std_20)
+    target_link_libraries(output_orientation_gpu_test PRIVATE dawn::webgpu_dawn)
+    add_test(NAME output_orientation_gpu_test COMMAND output_orientation_gpu_test
+      "${CMAKE_CURRENT_SOURCE_DIR}/../lib/webgpu/gpu.cpp")
     add_executable(cockpit_gpu_smoke cockpit_gpu_smoke.cpp)
     target_include_directories(cockpit_gpu_smoke PRIVATE ../include ../lib)
     target_compile_definitions(cockpit_gpu_smoke PRIVATE AURORA TARGET_PC WEBGPU_DAWN)

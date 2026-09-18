@@ -1,3 +1,4 @@
+#include "physical_wheel.h"
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -1568,7 +1569,7 @@ int RuntimeMain(int argc, char** argv) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             }
             aurora_quiesce_frame_worker();
-            mkw::vr::OpenXRShutdownBeforeAurora();aurora_shutdown();DiscordPresence::Shutdown();
+            mkw::vr::OpenXRShutdownBeforeAurora();physical_wheel::Shutdown();aurora_shutdown();DiscordPresence::Shutdown();
             ShutdownProcessTranscript();return 0;
         }
         // Start OpenXR before the guest entry point so the first-run choice is
@@ -1613,6 +1614,7 @@ int RuntimeMain(int argc, char** argv) {
         Fiber::GuestFiberManager::Shutdown();
         WindowPlacementPersistence::Flush(true);
         mkw::vr::OpenXRShutdownBeforeAurora();
+        physical_wheel::Shutdown();
         aurora_shutdown();
         DiscordPresence::Shutdown();
         SetRuntimeExitCodeImpl(0);
@@ -1632,6 +1634,7 @@ int RuntimeMain(int argc, char** argv) {
         Fiber::GuestFiberManager::Shutdown();
         WindowPlacementPersistence::Flush(true);
         mkw::vr::OpenXRShutdownBeforeAurora();
+        physical_wheel::Shutdown();
         aurora_shutdown();
         DiscordPresence::Shutdown();
         ShutdownProcessTranscript();
@@ -1645,6 +1648,7 @@ int RuntimeMain(int argc, char** argv) {
         Fiber::GuestFiberManager::Shutdown();
         WindowPlacementPersistence::Flush(true);
         mkw::vr::OpenXRShutdownBeforeAurora();
+        physical_wheel::Shutdown();
         aurora_shutdown();
         DiscordPresence::Shutdown();
         ShutdownProcessTranscript();

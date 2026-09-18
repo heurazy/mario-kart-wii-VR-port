@@ -3,6 +3,8 @@
 #include "hle/controller_status_contract.h"
 #include "wii_remote_input.h"
 #include "vr/quest_input.h"
+#include "vr/mkw_vr_policy.h"
+#include "physical_wheel.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -60,6 +62,10 @@ extern "C" uint32_t PAD__Read_HLE(uint32_t statusPtr)
         rumbleMask &= ~PAD_CHAN0_BIT;
     }
 
+    if (physical_wheel::ReadPad(statuses[0], PADIsInputBlocked(),
+        mkw::vr::MkwVRPolicyGetSnapshot().scene.mode == mkw::vr::VRSceneMode::Race)) {
+        rumbleMask |= PAD_CHAN0_BIT;
+    }
     try {
         for (uint32_t i = 0; i < PAD_CHANMAX; ++i) {
             WritePadStatus(statusPtr + static_cast<uint32_t>(i * PadStatusContract::kGuestStatusSize),
@@ -87,6 +93,6 @@ PPC_NATIVE_OVERRIDE(801AF1E4, PAD__Recalibrate_HLE, uint32_t, (uint32_t mask), (
 
 extern "C" void PAD__ControlMotor_HLE(int32_t chan, uint32_t command)
 {
-    PADControlMotor(chan, command);
+    if (!physical_wheel::Motor(chan, command)) PADControlMotor(chan, command);
 }
 PPC_NATIVE_OVERRIDE_VOID(801AF908, PAD__ControlMotor_HLE, (int32_t chan, uint32_t command), (chan, command));

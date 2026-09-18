@@ -1,92 +1,632 @@
+diff --git a/WheelWizard.Test/Features/Recomp/LocalVrLaunchDiagnosticsTests.cs b/WheelWizard.Test/Features/Recomp/LocalVrLaunchDiagnosticsTests.cs
+new file mode 100644
+index 00000000..5bede2bc
+--- /dev/null
++++ b/WheelWizard.Test/Features/Recomp/LocalVrLaunchDiagnosticsTests.cs
+@@ -0,0 +1,28 @@
++using WheelWizard.Services.Launcher;
++using Xunit;
++
++namespace WheelWizard.Test.Features.Recomp;
++
++public class LocalVrLaunchDiagnosticsTests
++{
++    [Fact]
++    public void MissingHeadsetDoesNotRecommendRecompilation()
++    {
++        var message = LocalVrLaunchDiagnostics.Classify("xrGetSystem failed: XR_ERROR_FORM_FACTOR_UNAVAILABLE", 1);
++        Assert.Contains("could not detect the headset", message);
++        Assert.Contains("Reinstalling the game will not fix this", message);
++    }
++
++    [Fact]
++    public void GeneralXrFailureHasRuntimeInstructions()
++    {
++        Assert.Contains("runtime could not start", LocalVrLaunchDiagnostics.Classify("OpenXR is required but unavailable", 1));
++    }
++
++    [Fact]
++    public void UnknownFailureDoesNotInventCorruptInstallation()
++    {
++        Assert.Contains("exit code 5", LocalVrLaunchDiagnostics.Classify("", 5));
++        Assert.DoesNotContain("Use Update", LocalVrLaunchDiagnostics.Classify("", 5));
++    }
++}
+diff --git a/WheelWizard.Test/Features/Recomp/LocalVrPathsTests.cs b/WheelWizard.Test/Features/Recomp/LocalVrPathsTests.cs
+new file mode 100644
+index 00000000..8c613126
+--- /dev/null
++++ b/WheelWizard.Test/Features/Recomp/LocalVrPathsTests.cs
+@@ -0,0 +1,89 @@
++using System.Text.Json;
++using WheelWizard.Services.Launcher;
++
++namespace WheelWizard.Test.Features.Recomp;
++
++public sealed class LocalVrPathsTests : IDisposable
++{
++    private readonly string root = Directory.CreateTempSubdirectory("WheelWizard-VR-tests-").FullName;
++    private string Launcher => Path.Combine(root, "WheelWizard");
++
++    public void Dispose() => Directory.Delete(root, recursive: true);
++
++    private static void State(string folder, string oldRoot, string pack)
++    {
++        Directory.CreateDirectory(folder);
++        File.WriteAllText(
++            Path.Combine(folder, "install-state.json"),
++            JsonSerializer.Serialize(new { InstallDir = oldRoot, RetroRewindRoot = pack })
++        );
++    }
++
++    [Fact]
++    public void InstalledLayoutSharesRuntimeConfigAndActualPack()
++    {
++        State(root, root, Path.Combine(root, "RetroRewind6"));
++        var paths = LocalVrPaths.Resolve(Launcher);
++        Assert.Equal(root, paths.InstallRoot);
++        Assert.Null(paths.PortableRoot);
++        Assert.Equal(
++            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WiiCompiled"),
++            paths.UserDataRoot
++        );
++        Assert.Equal(Path.Combine(root, "RetroRewind6"), paths.PackRoot);
++    }
++
++    [Fact]
++    public void PortableNestedInstallUsesParentUserData()
++    {
++        File.WriteAllText(Path.Combine(root, "portable.txt"), "");
++        var install = Path.Combine(root, "Install");
++        State(install, install, Path.Combine(install, "RetroRewind6"));
++        var paths = LocalVrPaths.Resolve(Launcher);
++        Assert.Equal(install, paths.InstallRoot);
++        Assert.Equal(root, paths.PortableRoot);
++        Assert.Equal(Path.Combine(root, "UserData"), paths.UserDataRoot);
++    }
++
++    [Fact]
++    public void MovedPortableRebasesPackWithoutUsingOldInstallation()
++    {
++        var old = Path.Combine(root, "old");
++        State(root, old, Path.Combine(old, "RetroRewind6"));
++        Assert.Equal(Path.Combine(root, "RetroRewind6"), LocalVrPaths.Resolve(Launcher).PackRoot);
++    }
++
++    [Fact]
++    public void MovedPortableAlsoRebasesSiblingPack()
++    {
++        File.WriteAllText(Path.Combine(root, "portable.txt"), "");
++        var install = Path.Combine(root, "Install");
++        var old = Path.Combine(root, "previousLocation");
++        State(install, Path.Combine(old, "Install"), Path.Combine(old, "RetroRewind6"));
++        Assert.Equal(Path.Combine(root, "RetroRewind6"), LocalVrPaths.Resolve(Launcher).PackRoot);
++    }
++
++    [Fact]
++    public void ExternalPackIsNeverRedirectedToInternalPack()
++    {
++        var install = Path.Combine(root, "Install");
++        var external = Path.Combine(root, "external", "RetroRewind6");
++        State(install, install, external);
++        Assert.Equal(external, LocalVrPaths.Resolve(Launcher).PackRoot);
++    }
++
++    [Fact]
++    public void ExistingRootWinsOverStrayInstallSubdirectory()
++    {
++        Directory.CreateDirectory(Path.Combine(root, "Install"));
++        State(root, root, Path.Combine(root, "RetroRewind6"));
++        Assert.Equal(root, LocalVrPaths.Resolve(Launcher).InstallRoot);
++    }
++
++    [Fact]
++    public void BrokenStateDoesNotCrashSettings()
++    {
++        File.WriteAllText(Path.Combine(root, "install-state.json"), "{");
++        Assert.Equal(Path.Combine(root, "RetroRewind6"), LocalVrPaths.Resolve(Launcher).PackRoot);
++    }
++}
 diff --git a/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs b/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs
-index f934e22..3eb3e87 100644
+index f934e22d..0be00e64 100644
 --- a/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs
 +++ b/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs
-@@ -24,6 +24,9 @@ public class AutoUpdaterSingletonService(
-
+@@ -24,6 +24,12 @@ public class AutoUpdaterSingletonService(
+ 
      public async Task CheckForUpdatesAsync()
      {
 +        // An upstream binary would remove the local VR launcher integration.
 +        if (WheelWizard.Services.Launcher.LocalVrLauncher.IsLocalBundle)
++        {
++            await CheckVrUpdatesAsync();
 +            return;
++        }
          // TODO: How to run this in a background thread?
          var latestRelease = await GetLatestReleaseAsync();
          if (latestRelease?.TagName is null)
+@@ -61,6 +67,53 @@ public class AutoUpdaterSingletonService(
+         }
+     }
+ 
++    private async Task CheckVrUpdatesAsync()
++    {
++        var paths = WheelWizard.Services.Launcher.LocalVrPaths.Current;
++        var statePath = Path.Combine(paths.InstallRoot, "install-state.json");
++        if (!File.Exists(statePath))
++            return;
++        string? current;
++        try
++        {
++            using var state = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(statePath));
++            current = state.RootElement.GetProperty("SetupVersion").GetString();
++        }
++        catch (Exception)
++        {
++            return;
++        }
++        if (!WheelWizard.Recomp.RecompVersion.TryParse(current, out var installed))
++            return;
++        var releases = await gitHubService.GetReleasesAsync("heurazy", "mario-kart-wii-VR-port", count: 100);
++        if (releases.IsFailure)
++            return;
++        var latest = WheelWizard.Recomp.RecompReleaseResolver.FindLatest(releases.Value);
++        if (latest is null || latest.Version.ComparePrecedenceTo(installed) <= 0)
++            return;
++        await Dispatcher.UIThread.InvokeAsync(async () =>
++        {
++            var accepted = await new YesNoWindow()
++                .SetMainText("Mario Kart Wii VR update available")
++                .SetExtraText(
++                    $"VR version {latest.TagName} is available (installed: {current}). Update the VR tools and rebuild from your PAL image."
++                )
++                .SetButtonText("Update VR", "Later")
++                .AwaitAnswer();
++            if (!accepted)
++                return;
++            var updater = Path.Combine(paths.BundleRoot, "Update-VR.cmd");
++            if (File.Exists(updater))
++                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(updater) { UseShellExecute = true });
++            else
++            {
++                var result = await WheelWizard.Services.Launcher.LocalVrLauncher.CreateRetro().Update();
++                if (result.IsFailure)
++                    await new MessageBoxWindow().SetTitleText("VR update failed").SetInfoText(result.Error.Message).ShowDialog();
++            }
++        });
++    }
++
+     private async Task<GithubRelease?> GetLatestReleaseAsync()
+     {
+         var releasesResult = await gitHubService.GetReleasesAsync();
+diff --git a/WheelWizard/Features/CustomDistributions/RetroRewind.cs b/WheelWizard/Features/CustomDistributions/RetroRewind.cs
+index f030f642..badd1004 100644
+--- a/WheelWizard/Features/CustomDistributions/RetroRewind.cs
++++ b/WheelWizard/Features/CustomDistributions/RetroRewind.cs
+@@ -150,7 +150,12 @@ public class RetroRewind : IDistribution
+                     if (!directory?.Exists ?? false)
+                         directory?.Create();
+                 }
+-                _fileSystem.File.Move(file, destinationPath, false); //skip existing files for safety
++                // Temp and the VR installation may live on different volumes.
++                // Preserve an existing save; publish other files without overwriting.
++                if (_fileSystem.File.Exists(destinationPath))
++                    continue;
++                _fileSystem.File.Copy(file, destinationPath, false);
++                _fileSystem.File.Delete(file);
+             }
+         }
+         catch (Exception e)
+diff --git a/WheelWizard/Features/Recomp/RecompInstallService.cs b/WheelWizard/Features/Recomp/RecompInstallService.cs
+index fc9cb894..f70cef64 100644
+--- a/WheelWizard/Features/Recomp/RecompInstallService.cs
++++ b/WheelWizard/Features/Recomp/RecompInstallService.cs
+@@ -193,7 +193,7 @@ public sealed class RecompInstallService : IRecompInstallService
+             logger.LogInformation("The WiiCompiled product check could not run because the installation is busy");
+ 
+         var status = RecompStatusResolver.Resolve(
+-            IsGameFileConfigured(),
++            IsGameFileConfigured() || (Services.Launcher.LocalVrLauncher.IsLocalBundle && IsCurrentInstallState(state)),
+             hasInstalledHost ? installedVersion : null,
+             latestRelease?.TagName,
+             products?.IsSuccess == true ? products.Value : null,
+@@ -380,7 +380,7 @@ public sealed class RecompInstallService : IRecompInstallService
+     {
+         // No platform guard here on purpose: AddRecomp() is the single gate, so this service only ever
+         // exists on Windows in the first place.
+-        if (!IsGameFileConfigured())
++        if (!IsGameFileConfigured() && !(Services.Launcher.LocalVrLauncher.IsLocalBundle && ReadCurrentInstallState() is not null))
+             return Fail(t("message_warning.not_find_game.extra"));
+ 
+         Report(progress, t("progress.recomp_checking_release"), 0);
+@@ -417,6 +417,20 @@ public sealed class RecompInstallService : IRecompInstallService
+         if (setupResult.IsFailure)
+             return setupResult.Error;
+ 
++        if (!IsGameFileConfigured())
++            return Fail("Select your original PAL disc image in Wheel Wizard settings before upgrading the VR runtime.");
++        if (
++            Services.Launcher.LocalVrLauncher.IsLocalBundle
++            && Path.GetFullPath(AppContext.BaseDirectory)
++                .StartsWith(
++                    Path.TrimEndingDirectorySeparator(Services.Launcher.LocalVrLauncher.RuntimeDirectory) + Path.DirectorySeparatorChar,
++                    StringComparison.OrdinalIgnoreCase
++                )
++        )
++            return Fail(
++                "This runtime upgrade also replaces the running launcher. Close Wheel Wizard, then run the downloaded setup: "
++                    + setupResult.Value
++            );
+         return await RunSilentInstallAsync(setupResult.Value, payloadMode, progress, cancellationToken);
+     }
+ 
+@@ -512,6 +526,7 @@ public sealed class RecompInstallService : IRecompInstallService
+         if (!reconciled)
+             return Fail("WiiCompiled must complete its current pre-launch reconciliation before it can launch.");
+ 
++        var launchedUtc = DateTime.UtcNow;
+         var launchResult = await processRunner.RunAsync(
+             environment.InstalledSetupFilePath,
+             RecompSetupCommandBuilder.BuildLaunchArguments(retroRewind: true),
+@@ -521,11 +536,19 @@ public sealed class RecompInstallService : IRecompInstallService
+         );
+         if (launchResult.IsFailure)
+             return launchResult.Error;
+-        return launchResult.Value == 0 ? Ok() : Fail($"WiiCompiled exited with code {launchResult.Value}.");
++        return launchResult.Value == 0
++            ? Ok()
++            : Fail(
++                Services.Launcher.LocalVrLauncher.IsLocalBundle
++                    ? Services.Launcher.LocalVrLaunchDiagnostics.Describe("retro_rewind", launchedUtc, launchResult.Value)
++                    : $"WiiCompiled exited with code {launchResult.Value}."
++            );
+     }
+ 
+     public async Task<OperationResult> UninstallAsync(CancellationToken cancellationToken = default)
+     {
++        if (Services.Launcher.LocalVrLauncher.IsLocalBundle)
++            return Fail("Use the VR installer to manage this shared installation. Saves and the running launcher cannot be removed here.");
+         if (!await _operationGate.WaitAsync(0, cancellationToken))
+             return Fail(OperationAlreadyRunningMessage);
+ 
+diff --git a/WheelWizard/Features/Recomp/RecompLauncher.cs b/WheelWizard/Features/Recomp/RecompLauncher.cs
+index 130f004a..6770dafc 100644
+--- a/WheelWizard/Features/Recomp/RecompLauncher.cs
++++ b/WheelWizard/Features/Recomp/RecompLauncher.cs
+@@ -93,7 +93,7 @@ public class RecompLauncher(
+ 
+         // The recomp compiled without any NAND knowledge; pointing its Config.toml at the chosen
+         // Wii data is what makes the choice real, and it applies on the very next launch.
+-        return dolphinData.ApplyNandToRecompConfig();
++        return LocalVrLauncher.IsLocalBundle ? Ok() : dolphinData.ApplyNandToRecompConfig();
+     }
+ 
+     /// <summary>
+@@ -108,7 +108,7 @@ public class RecompLauncher(
+         if (updateResult.IsFailure)
+             return updateResult;
+ 
+-        return dolphinData.ApplyNandToRecompConfig();
++        return LocalVrLauncher.IsLocalBundle ? Ok() : dolphinData.ApplyNandToRecompConfig();
+     }
+ 
+     public async Task<WheelWizardStatus> GetCurrentStatus()
+diff --git a/WheelWizard/Features/Recomp/RecompReleaseResolver.cs b/WheelWizard/Features/Recomp/RecompReleaseResolver.cs
+index cde21dc5..2cde3a18 100644
+--- a/WheelWizard/Features/Recomp/RecompReleaseResolver.cs
++++ b/WheelWizard/Features/Recomp/RecompReleaseResolver.cs
+@@ -13,12 +13,12 @@ public static class RecompReleaseResolver
+     /// <summary>
+     /// The owner of the recomp staging repository.
+     /// </summary>
+-    public const string RepositoryOwner = "patchzyy";
++    public static string RepositoryOwner => Services.Launcher.LocalVrLauncher.IsLocalBundle ? "heurazy" : "patchzyy";
+ 
+     /// <summary>
+     /// The name of the recomp staging repository.
+     /// </summary>
+-    public const string RepositoryName = "Wiicompiled";
++    public static string RepositoryName => Services.Launcher.LocalVrLauncher.IsLocalBundle ? "mario-kart-wii-VR-port" : "Wiicompiled";
+ 
+     /// <summary>
+     /// Returns the newest usable release, or <see langword="null"/> when the listing contains none.
+diff --git a/WheelWizard/Features/Settings/SettingsManager.cs b/WheelWizard/Features/Settings/SettingsManager.cs
+index ce6b1b1d..7d0a8d5c 100644
+--- a/WheelWizard/Features/Settings/SettingsManager.cs
++++ b/WheelWizard/Features/Settings/SettingsManager.cs
+@@ -283,7 +283,8 @@ public class SettingsManager : ISettingsManager
+ 
+     private OperationResult<SettingsValidationReport> ValidateDolphinPathSettings() => ValidatePathSettings(requireDolphin: true);
+ 
+-    public bool IsRecompModeActive() => OperatingSystem.IsWindows() && Get<bool>(ENABLE_RECOMP);
++    public bool IsRecompModeActive() =>
++        OperatingSystem.IsWindows() && (WheelWizard.Services.Launcher.LocalVrLauncher.IsLocalBundle || Get<bool>(ENABLE_RECOMP));
+ 
+     private OperationResult<SettingsValidationReport> ValidatePathSettings(bool requireDolphin)
+     {
+@@ -299,7 +300,13 @@ public class SettingsManager : ISettingsManager
+                     new(SettingsValidationCode.InvalidDolphinLocation, DOLPHIN_LOCATION.Name, "Dolphin path or command is invalid.")
+                 );
+ 
+-            if (!GAME_LOCATION.IsValid())
++            if (
++                !GAME_LOCATION.IsValid()
++                && !(
++                    WheelWizard.Services.Launcher.LocalVrLauncher.IsLocalBundle
++                    && _fileSystem.File.Exists(Path.Combine(PathManager.RecompInstallFolderPath, "GameAssets", "DATA", "sys", "fst.bin"))
++                )
++            )
+                 issues.Add(new(SettingsValidationCode.InvalidGameLocation, GAME_LOCATION.Name, "Game file path is invalid."));
+ 
+             return Ok(new SettingsValidationReport(issues));
+diff --git a/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs b/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs
+index 9bcbfb25..f4e2d5a8 100644
+--- a/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs
++++ b/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs
+@@ -756,6 +756,8 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+ 
+     private OperationResult SaveRksysToFile()
+     {
++        if (WheelWizard.Services.Launcher.LocalVrLauncher.IsBusy)
++            return Fail("Close the VR game before editing licenses or friends.");
+         if (_rksysData == null || !_settingsManager.PathsSetupCorrectly())
+             return Fail("Invalid save data or config is not setup properly.");
+         FixRksysCrc(_rksysData);
+diff --git a/WheelWizard/Features/WiiManagement/MiiManagement/MiiRepositoryService.cs b/WheelWizard/Features/WiiManagement/MiiManagement/MiiRepositoryService.cs
+index fa102783..e1445b21 100644
+--- a/WheelWizard/Features/WiiManagement/MiiManagement/MiiRepositoryService.cs
++++ b/WheelWizard/Features/WiiManagement/MiiManagement/MiiRepositoryService.cs
+@@ -68,6 +68,8 @@ public class MiiRepositoryServiceService(
+ 
+     private string ResolveMiiDbFilePath()
+     {
++        if (WheelWizard.Services.Launcher.LocalVrLauncher.IsLocalBundle)
++            return PathManager.MiiDbFile;
+         if (!settings.IsRecompModeActive())
+             return PathManager.MiiDbFile;
+ 
+@@ -115,6 +117,8 @@ public class MiiRepositoryServiceService(
+ 
+     private OperationResult SaveAllBlocks(List<byte[]> blocks, string databasePath)
+     {
++        if (WheelWizard.Services.Launcher.LocalVrLauncher.IsBusy)
++            return Fail("Close the VR game before editing Miis.");
+         if (!fileSystem.File.Exists(databasePath))
+             return Fail("RFL_DB.dat not found.", MessageTranslation.Error_UpdateMiiDb_RFLdbNotFound);
+ 
+@@ -186,6 +190,8 @@ public class MiiRepositoryServiceService(
+ 
+     public OperationResult ForceCreateDatabase()
+     {
++        if (WheelWizard.Services.Launcher.LocalVrLauncher.IsBusy)
++            return Fail("Close the VR game before creating a Mii database.");
+         var databasePath = ResolveMiiDbFilePath();
+         if (fileSystem.File.Exists(databasePath))
+             return Fail("Database already exists.", MessageTranslation.Error_MiiDBAlreadyExists);
+diff --git a/WheelWizard/Program.cs b/WheelWizard/Program.cs
+index bcbc5351..e9ae752a 100644
+--- a/WheelWizard/Program.cs
++++ b/WheelWizard/Program.cs
+@@ -16,6 +16,29 @@ public class Program : IDesignerEntryPoint
+     [STAThread]
+     public static void Main(string[] args)
+     {
++        // Read-only support command; no GUI, settings writes, downloads or game launch.
++        if (args.Contains("--vr-diagnostics", StringComparer.OrdinalIgnoreCase))
++        {
++            var paths = Services.Launcher.LocalVrPaths.Current;
++            Console.WriteLine(
++                System.Text.Json.JsonSerializer.Serialize(
++                    new
++                    {
++                        vr = Services.Launcher.LocalVrLauncher.IsLocalBundle,
++                        install = paths.InstallRoot,
++                        userData = paths.UserDataRoot,
++                        pack = paths.PackRoot,
++                        patches = Path.Combine(paths.PackRoot, "Patches"),
++                        saves = Path.Combine(Path.GetDirectoryName(paths.PackRoot)!, "riivolution", "save", "RetroWFC"),
++                        setupFound = File.Exists(Path.Combine(paths.InstallRoot, "WiiCompiled-Setup.exe")),
++                        baseFound = File.Exists(Path.Combine(paths.InstallRoot, "Base", "WiiCompiled.exe")),
++                        retroFound = File.Exists(Path.Combine(paths.InstallRoot, "RetroRewind", "RetroRewind.exe")),
++                        updateRepository = Recomp.RecompReleaseResolver.RepositoryOwner + "/" + Recomp.RecompReleaseResolver.RepositoryName,
++                    }
++                )
++            );
++            return;
++        }
+         // Make sure this is the first action on startup!
+         SetupWorkingDirectory();
+ 
+diff --git a/WheelWizard/Services/Launcher/LauncherProvider.cs b/WheelWizard/Services/Launcher/LauncherProvider.cs
+index 3c264b79..1aabae64 100644
+--- a/WheelWizard/Services/Launcher/LauncherProvider.cs
++++ b/WheelWizard/Services/Launcher/LauncherProvider.cs
+@@ -16,7 +16,7 @@ public interface ILauncherProvider
+ public class LauncherProvider(ISettingsManager settings, IServiceProvider serviceProvider) : ILauncherProvider
+ {
+     public ILauncher GetActiveLauncher() =>
+-        settings.IsRecompModeActive()
+-            ? serviceProvider.GetRequiredService<RecompLauncher>()
+-            : serviceProvider.GetRequiredService<RrLauncher>();
++        LocalVrLauncher.IsLocalBundle ? LocalVrLauncher.CreateRetro()
++        : settings.IsRecompModeActive() ? serviceProvider.GetRequiredService<RecompLauncher>()
++        : serviceProvider.GetRequiredService<RrLauncher>();
+ }
+diff --git a/WheelWizard/Services/Launcher/LocalVrLaunchDiagnostics.cs b/WheelWizard/Services/Launcher/LocalVrLaunchDiagnostics.cs
+new file mode 100644
+index 00000000..bd80bd25
+--- /dev/null
++++ b/WheelWizard/Services/Launcher/LocalVrLaunchDiagnostics.cs
+@@ -0,0 +1,40 @@
++namespace WheelWizard.Services.Launcher;
++
++public static class LocalVrLaunchDiagnostics
++{
++    public static string Classify(string transcript, int exitCode)
++    {
++        if (transcript.Contains("XR_ERROR_FORM_FACTOR_UNAVAILABLE", StringComparison.Ordinal))
++            return "SteamVR could not detect the headset. Connect Quest Link or Virtual Desktop, open SteamVR and wait until the headset is ready, then press Play again. Reinstalling the game will not fix this.";
++        if (transcript.Contains("OpenXR is required but unavailable", StringComparison.Ordinal))
++            return "The VR runtime could not start. Open SteamVR, connect the headset, then try again. See the session log for the OpenXR error.";
++        return $"The VR game stopped with exit code {exitCode}. This does not necessarily mean the installation needs repair. See the session log for the cause.";
++    }
++
++    public static string Describe(string profile, DateTime launchedUtc, int exitCode)
++    {
++        try
++        {
++            var logs = Path.Combine(LocalVrPaths.Current.UserDataRoot, "Logs");
++            if (Directory.Exists(logs))
++            {
++                var session = new DirectoryInfo(logs)
++                    .EnumerateDirectories(profile + "_*")
++                    .Where(d => d.CreationTimeUtc >= launchedUtc)
++                    .OrderByDescending(d => d.CreationTimeUtc)
++                    .FirstOrDefault();
++                if (session is not null)
++                {
++                    var path = Path.Combine(session.FullName, "console.log");
++                    using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
++                    file.Seek(Math.Max(0, file.Length - 131072), SeekOrigin.Begin);
++                    using var reader = new StreamReader(file);
++                    return Classify(reader.ReadToEnd(), exitCode) + "\n\nLog: " + path;
++                }
++            }
++        }
++        catch (IOException) { }
++        catch (UnauthorizedAccessException) { }
++        return $"The VR launch failed (exit code {exitCode}) before a new session log was found. Check that SteamVR and the headset are ready. If setup reports an invalid product, repair that product.";
++    }
++}
 diff --git a/WheelWizard/Services/Launcher/LocalVrLauncher.cs b/WheelWizard/Services/Launcher/LocalVrLauncher.cs
 new file mode 100644
-index 0000000..ee4c4c3
+index 00000000..f641d2a2
 --- /dev/null
 +++ b/WheelWizard/Services/Launcher/LocalVrLauncher.cs
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,144 @@
 +using System.Diagnostics;
 +using WheelWizard.Models.Enums;
 +using WheelWizard.Mods;
++using WheelWizard.Recomp;
++using WheelWizard.Views;
 +
 +namespace WheelWizard.Services.Launcher;
 +
-+// Local VR products are maintained with their translated code and matching pack.
-+// Never reconcile them through the upstream non-VR setup/updater.
++// Retro Rewind uses the full upstream install, patch and reconciliation workflow.
 +public sealed class LocalVrLauncher(string title, string executableRelativePath, IModsLaunchService? mods = null) : ILauncher
 +{
 +    private static readonly SemaphoreSlim LaunchGate = new(1, 1);
 +    public static bool IsLocalBundle => File.Exists(Path.Combine(AppContext.BaseDirectory, "vr-local.txt"));
-+    public static string BundleRoot => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
-+    public static string RuntimeDirectory => Directory.Exists(Path.Combine(BundleRoot, "Install"))
-+        ? Path.Combine(BundleRoot, "Install")
-+        : BundleRoot;
-+    public string GameTitle => title;
-+    private string Executable => Path.Combine(RuntimeDirectory, executableRelativePath);
++    public static string BundleRoot => LocalVrPaths.Current.BundleRoot;
++    public static string RuntimeDirectory => LocalVrPaths.Current.InstallRoot;
++    public static bool OperationInFlight => LaunchGate.CurrentCount == 0;
++    public static bool IsBusy => IsLocalBundle && (OperationInFlight || HasRunningGame());
 +
-+    public Task<WheelWizardStatus> GetCurrentStatus() =>
-+        Task.FromResult(
-+            File.Exists(Executable) && Directory.Exists(Path.Combine(RuntimeDirectory, "GameAssets", "DATA"))
-+                ? WheelWizardStatus.Ready
-+                : WheelWizardStatus.NotInstalled
-+        );
-+
-+    public async Task<OperationResult> Install() => await RunSetup();
-+
-+    public Task<OperationResult> Update()
++    private static bool HasRunningGame()
 +    {
-+        var updater = Path.Combine(BundleRoot, "Update-VR.cmd");
-+        if (!File.Exists(updater)) return RunSetup();
-+        try
++        foreach (var name in new[] { "WiiCompiled", "RetroRewind" })
++        foreach (var process in Process.GetProcessesByName(name))
 +        {
-+            Process.Start(new ProcessStartInfo(updater) { UseShellExecute = true });
-+            return Task.FromResult<OperationResult>(Ok());
++            using (process)
++            {
++                try
++                {
++                    var path = process.MainModule?.FileName;
++                    if (
++                        path is not null
++                        && Path.GetFullPath(path)
++                            .StartsWith(
++                                Path.TrimEndingDirectorySeparator(RuntimeDirectory) + Path.DirectorySeparatorChar,
++                                StringComparison.OrdinalIgnoreCase
++                            )
++                    )
++                        return true;
++                }
++                catch (System.ComponentModel.Win32Exception)
++                {
++                    return true;
++                }
++                catch (InvalidOperationException) { }
++            }
 +        }
-+        catch (Exception exception) { return Task.FromResult<OperationResult>(Fail("VR update could not start: " + exception.Message)); }
++        return false;
 +    }
 +
-+    public async Task<OperationResult> Launch()
++    private bool IsRetro => mods is not null;
++    private RecompLauncher Retro => App.Services.GetRequiredService<RecompLauncher>();
++    public string GameTitle => title;
++
++    public static LocalVrLauncher CreateRetro() =>
++        new("Retro Rewind VR", Path.Combine("RetroRewind", "RetroRewind.exe"), App.Services.GetRequiredService<IModsLaunchService>());
++
++    public async Task<WheelWizardStatus> GetCurrentStatus()
 +    {
-+        if (!await LaunchGate.WaitAsync(0))
-+            return Fail("A VR game is already running from Wheel Wizard.");
-+        try
++        if (OperationInFlight)
++            return WheelWizardStatus.Ready;
++        if (IsRetro)
++            return await Retro.GetCurrentStatus();
++        return
++            File.Exists(Path.Combine(RuntimeDirectory, executableRelativePath))
++            && File.Exists(Path.Combine(RuntimeDirectory, "GameAssets", "DATA", "sys", "fst.bin"))
++            ? WheelWizardStatus.Ready
++            : WheelWizardStatus.NotInstalled;
++    }
++
++    public Task<OperationResult> Install() => Guard(IsRetro ? Retro.Install : RunSetup);
++
++    public Task<OperationResult> Update() => Guard(IsRetro ? Retro.Update : RunSetup);
++
++    public Task<OperationResult> ReinstallRetro() =>
++        Guard(async () =>
 +        {
-+            if (!File.Exists(Executable))
-+                return Fail("VR executable is missing: " + Executable);
-+            if (mods is not null)
++            var progress = new WheelWizard.Views.Popups.Generic.ProgressWindow("Reinstalling Retro Rewind");
++            progress.Show();
++            OperationResult result;
++            try
 +            {
-+                // This directory starts empty in the bundle and is exclusively
-+                // managed by Wheel Wizard's enabled-mod list. Pack assets stay
-+                // in their other original directories.
-+                var patches = Path.Combine(BundleRoot, "RetroRewind6", "Patches");
-+                var prepared = await mods.PrepareModsForLaunch(patches, clearTargetFolderWhenNoEnabledMods: true);
-+                if (prepared.IsFailure)
-+                    return prepared;
++                result = await App
++                    .Services.GetRequiredService<WheelWizard.CustomDistributions.ICustomDistributionSingletonService>()
++                    .RetroRewind.ReinstallAsync(progress);
 +            }
++            finally
++            {
++                progress.Close();
++            }
++            if (result.IsFailure)
++                return result;
++            return await Retro.Update();
++        });
++
++    public Task<OperationResult> Launch() =>
++        Guard(async () =>
++        {
++            if (IsRetro)
++                return await Retro.Launch();
++            var setup = Path.Combine(RuntimeDirectory, "WiiCompiled-Setup.exe");
++            if (!File.Exists(setup))
++                return Fail("The VR setup host is missing. Repair the installation.");
++            var launchedUtc = DateTime.UtcNow;
 +            using var process = Process.Start(
-+                new ProcessStartInfo(Executable) { WorkingDirectory = Path.GetDirectoryName(Executable)!, UseShellExecute = false }
++                new ProcessStartInfo(setup, "--launch-base") { WorkingDirectory = RuntimeDirectory, UseShellExecute = false }
 +            );
 +            if (process is null)
-+                return Fail("The VR game could not be started.");
++                return Fail("The VR game could not start.");
 +            await process.WaitForExitAsync();
-+            return process.ExitCode == 0 ? Ok() : Fail($"The VR game exited with code {process.ExitCode}. See QuestVR/UserData/Logs.");
-+        }
-+        catch (Exception exception)
++            return process.ExitCode == 0 ? Ok() : Fail(LocalVrLaunchDiagnostics.Describe("base", launchedUtc, process.ExitCode));
++        });
++
++    private static async Task<OperationResult> Guard(Func<Task<OperationResult>> action)
++    {
++        if (HasRunningGame())
++            return Fail("Close the running VR game before launching or updating.");
++        if (!await LaunchGate.WaitAsync(0))
++            return Fail("A VR game or installation is already running.");
++        try
 +        {
-+            return Fail("VR launch failed: " + exception.Message);
++            return await action();
++        }
++        catch (Exception e)
++        {
++            return Fail("VR operation failed: " + e.Message);
 +        }
 +        finally
 +        {
@@ -94,34 +634,97 @@ index 0000000..ee4c4c3
 +        }
 +    }
 +
-+    private async Task<OperationResult> RunSetup()
++    private static async Task<OperationResult> RunSetup()
 +    {
-+        var portableSetup = Path.Combine(BundleRoot, "WiiCompiled-VR-Setup.exe");
-+        var installedSetup = Path.Combine(BundleRoot, "WiiCompiled-Setup.exe");
-+        var runtimeSetup = Path.Combine(RuntimeDirectory, "WiiCompiled-Setup.exe");
-+        var setup = File.Exists(portableSetup) ? portableSetup
-+            : File.Exists(installedSetup) ? installedSetup
-+            : runtimeSetup;
++        var installed = Path.Combine(RuntimeDirectory, "WiiCompiled-Setup.exe");
++        var setup = File.Exists(installed) ? installed : Path.Combine(BundleRoot, "WiiCompiled-VR-Setup.exe");
 +        if (!File.Exists(setup))
-+            return Fail("The WiiCompiled VR setup executable is missing from the installation folder.");
-+        try
-+        {
-+            using var process = Process.Start(new ProcessStartInfo(setup) { UseShellExecute = true });
-+            if (process is null)
-+                return Fail("The VR setup could not be started.");
-+            await process.WaitForExitAsync();
-+            return await GetCurrentStatus() == WheelWizardStatus.Ready
-+                ? Ok()
-+                : Fail("Installation is not complete. Run setup again and select your clean PAL RMCP01 disc image.");
-+        }
-+        catch (Exception exception)
-+        {
-+            return Fail("VR setup failed: " + exception.Message);
-+        }
++            return Fail("The VR setup executable is missing.");
++        using var process = Process.Start(new ProcessStartInfo(setup) { UseShellExecute = true });
++        if (process is null)
++            return Fail("The VR setup could not start.");
++        await process.WaitForExitAsync();
++        return process.ExitCode == 0 ? Ok() : Fail("VR setup did not complete.");
 +    }
 +}
+diff --git a/WheelWizard/Services/Launcher/LocalVrPaths.cs b/WheelWizard/Services/Launcher/LocalVrPaths.cs
+new file mode 100644
+index 00000000..f4fef78b
+--- /dev/null
++++ b/WheelWizard/Services/Launcher/LocalVrPaths.cs
+@@ -0,0 +1,57 @@
++using System.Text.Json;
++
++namespace WheelWizard.Services.Launcher;
++
++// Shared by launch, updates, save/Mii management and settings.
++public sealed record LocalVrPaths(string BundleRoot, string InstallRoot, string? PortableRoot, string UserDataRoot, string PackRoot)
++{
++    public static LocalVrPaths Current => Resolve(AppContext.BaseDirectory);
++
++    public static LocalVrPaths Resolve(string launcherDirectory)
++    {
++        var bundle = Path.GetFullPath(Path.Combine(launcherDirectory, ".."));
++        var install =
++            File.Exists(Path.Combine(bundle, "install-state.json")) ? bundle
++            : Directory.Exists(Path.Combine(bundle, "Install")) ? Path.Combine(bundle, "Install")
++            : bundle;
++        string? portable = null;
++        for (var folder = new DirectoryInfo(install); folder is not null; folder = folder.Parent)
++        {
++            if (!File.Exists(Path.Combine(folder.FullName, "portable.txt")))
++                continue;
++            portable = folder.FullName;
++            break;
++        }
++        var data = portable is not null
++            ? Path.Combine(portable, "UserData")
++            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WiiCompiled");
++        var pack = Path.Combine(install, "RetroRewind6");
++        try
++        {
++            var stateFile = Path.Combine(install, "install-state.json");
++            if (File.Exists(stateFile))
++            {
++                using var state = JsonDocument.Parse(File.ReadAllText(stateFile));
++                if (state.RootElement.TryGetProperty("RetroRewindRoot", out var rr) && rr.GetString() is { Length: > 0 } recorded)
++                {
++                    // Rebase internal packs after moving a portable folder. External packs stay external.
++                    if (state.RootElement.TryGetProperty("InstallDir", out var previous) && previous.GetString() is { Length: > 0 } old)
++                    {
++                        var oldBase =
++                            portable is not null && Path.GetRelativePath(portable, install) == "Install"
++                                ? Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(old))!
++                                : old;
++                        var newBase = portable is not null && Path.GetRelativePath(portable, install) == "Install" ? portable : install;
++                        var relative = Path.GetRelativePath(oldBase, recorded);
++                        if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar))
++                            recorded = Path.Combine(newBase, relative);
++                    }
++                    pack = Path.GetFullPath(recorded);
++                }
++            }
++        }
++        catch (JsonException) { } // Setup reports invalid state before launch.
++        catch (IOException) { }
++        return new(portable ?? bundle, install, portable, data, pack);
++    }
++}
+diff --git a/WheelWizard/Services/Launcher/RrLauncher.cs b/WheelWizard/Services/Launcher/RrLauncher.cs
+index bcb8d352..275bfbb5 100644
+--- a/WheelWizard/Services/Launcher/RrLauncher.cs
++++ b/WheelWizard/Services/Launcher/RrLauncher.cs
+@@ -30,6 +30,8 @@ public class RrLauncher : ILauncher
+ 
+     public async Task<OperationResult> Launch()
+     {
++        if (LocalVrLauncher.IsLocalBundle)
++            return await LocalVrLauncher.CreateRetro().Launch();
+         try
+         {
+             //case SHOULD be impossible since launch button should be disabled
 diff --git a/WheelWizard/Services/PathManager.cs b/WheelWizard/Services/PathManager.cs
-index 52418fc..119ea84 100644
+index 52418fce..0aea80a6 100644
 --- a/WheelWizard/Services/PathManager.cs
 +++ b/WheelWizard/Services/PathManager.cs
 @@ -26,13 +26,20 @@ public static class PathManager
@@ -137,7 +740,7 @@ index 52418fc..119ea84 100644
 +        )
      );
      private static string? _wheelWizardAppdataOverride;
-
+ 
      static PathManager()
      {
 -        _wheelWizardAppdataOverride = LoadSavedWheelWizardAppdataOverride();
@@ -145,10 +748,86 @@ index 52418fc..119ea84 100644
 +            ? null
 +            : LoadSavedWheelWizardAppdataOverride();
      }
-
+ 
      public static string HomeFolderPath => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+@@ -84,23 +91,27 @@ public static class PathManager
+ 
+     // WiiCompiled is portable: <RecompFolderPath> is the portable root the backend owns
+     // (portable.txt, Install\, UserData\), so the whole product travels with Wheel Wizard's data directory.
+-    public static string RecompFolderPath => Path.Combine(WheelWizardAppdataPath, "Recomp");
++    public static string RecompFolderPath =>
++        Launcher.LocalVrLauncher.IsLocalBundle ? Launcher.LocalVrPaths.Current.BundleRoot : Path.Combine(WheelWizardAppdataPath, "Recomp");
+ 
+     /// <summary>The portable install directory inside the recomp's portable root.</summary>
+     public static string PortableRecompInstallFolderPath => Path.Combine(RecompFolderPath, "Install");
+ 
+     /// <summary>The backend install directory inside Wheel Wizard's portable recomp root.</summary>
+-    public static string RecompInstallFolderPath => PortableRecompInstallFolderPath;
++    public static string RecompInstallFolderPath =>
++        Launcher.LocalVrLauncher.IsLocalBundle ? Launcher.LocalVrPaths.Current.InstallRoot : PortableRecompInstallFolderPath;
+ 
+     /// <summary>Whether the recomp uses the portable layout, which is what earns the setup's <c>--portable</c> flag.</summary>
+-    public static bool IsRecompInstallPortable => true;
++    public static bool IsRecompInstallPortable =>
++        !Launcher.LocalVrLauncher.IsLocalBundle || Launcher.LocalVrPaths.Current.PortableRoot is not null;
+ 
+     public static string RecompCacheFolderPath => Path.Combine(RecompFolderPath, "Cache");
+     public static string RecompInstallStateFilePath => Path.Combine(RecompInstallFolderPath, RecompInstallStateFileName);
+     public static string RecompSetupFilePath => Path.Combine(RecompInstallFolderPath, "WiiCompiled-Setup.exe");
+ 
+     /// <summary>The backend-owned runtime user state (Config.toml, private NAND, caches) inside the portable root.</summary>
+-    public static string RecompUserDataFolderPath => Path.Combine(RecompFolderPath, "UserData");
++    public static string RecompUserDataFolderPath =>
++        Launcher.LocalVrLauncher.IsLocalBundle ? Launcher.LocalVrPaths.Current.UserDataRoot : Path.Combine(RecompFolderPath, "UserData");
+ 
+     /// <summary>The recomp's own settings file, shared between Wheel Wizard and the in-game settings bar.</summary>
+     public static string RecompConfigFilePath => Path.Combine(RecompUserDataFolderPath, "Config.toml");
+@@ -567,7 +578,7 @@ public static class PathManager
+ 
+     // Helper paths for folders used across multiple files
+ 
+-    public static string PatchesFolderPath => Path.Combine(RiivolutionWhWzFolderPath, "RetroRewind6", "Patches");
++    public static string PatchesFolderPath => Path.Combine(RetroRewind6FolderPath, "Patches");
+     public static string RrBetaFolderPath => Path.Combine(RiivolutionWhWzFolderPath, "RRBeta");
+     public static string RrBetaPatchesFolderPath => Path.Combine(RrBetaFolderPath, "Patches");
+ 
+@@ -580,6 +591,8 @@ public static class PathManager
+     {
+         get
+         {
++            if (Launcher.LocalVrLauncher.IsLocalBundle)
++                return Path.GetDirectoryName(Launcher.LocalVrPaths.Current.PackRoot)!;
+             if (Settings.LOAD_PATH.IsValid() || !string.IsNullOrWhiteSpace(UserFolderPath))
+                 return Path.Combine(LoadFolderPath, "Riivolution", "WheelWizard");
+ 
+@@ -587,7 +600,10 @@ public static class PathManager
+         }
+     }
+ 
+-    public static string RetroRewind6FolderPath => Path.Combine(RiivolutionWhWzFolderPath, "RetroRewind6");
++    public static string RetroRewind6FolderPath =>
++        Launcher.LocalVrLauncher.IsLocalBundle
++            ? Launcher.LocalVrPaths.Current.PackRoot
++            : Path.Combine(RiivolutionWhWzFolderPath, "RetroRewind6");
+ 
+     // This is not the folder your save file is located in, but its the folder where every Region folder is, so the save file is in SaveFolderPath/Region
+     public static string SaveFolderPath => Path.Combine(RiivolutionWhWzFolderPath, "riivolution", "save", "RetroWFC");
+@@ -714,6 +730,13 @@ public static class PathManager
+     {
+         get
+         {
++            if (Launcher.LocalVrLauncher.IsLocalBundle)
++            {
++                var configured = Settings.Get<string>(Settings.RECOMP_NAND_ROOT);
++                return string.IsNullOrWhiteSpace(configured)
++                    ? RecompPrivateNandFolderPath
++                    : Path.GetFullPath(configured, RecompUserDataFolderPath);
++            }
+             if (Settings.NAND_ROOT_PATH.IsValid())
+             {
+                 return Settings.Get<string>(Settings.NAND_ROOT_PATH);
 diff --git a/WheelWizard/Views/App.axaml.cs b/WheelWizard/Views/App.axaml.cs
-index 399fa5a..a915a3d 100644
+index 399fa5a2..962591ce 100644
 --- a/WheelWizard/Views/App.axaml.cs
 +++ b/WheelWizard/Views/App.axaml.cs
 @@ -156,7 +156,13 @@ public class App : Application
@@ -166,22 +845,13 @@ index 399fa5a..a915a3d 100644
                  var launchResult = await rrLauncher.Launch();
                  if (launchResult.IsFailure)
                  {
-@@ -198,7 +204,7 @@ public class App : Application
-         try
-         {
-             var resourceInstaller = Services.GetRequiredService<IMiiRenderingResourceInstaller>();
--            if (resourceInstaller.GetResolvedResourcePath().IsFailure)
-+            if (!LocalVrLauncher.IsLocalBundle && resourceInstaller.GetResolvedResourcePath().IsFailure)
-             {
-                 var setupPopup = new MiiRenderingSetupPopup();
-                 var shouldContinue = await setupPopup.ShowAndAwaitCompletionAsync();
 diff --git a/WheelWizard/Views/Pages/HomePage.axaml b/WheelWizard/Views/Pages/HomePage.axaml
-index a80a85a..77f16aa 100644
+index a80a85a1..77f16aa7 100644
 --- a/WheelWizard/Views/Pages/HomePage.axaml
 +++ b/WheelWizard/Views/Pages/HomePage.axaml
 @@ -118,11 +118,11 @@
                  VerticalAlignment="Bottom" />
-
+ 
          <StackPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="0,6"
 -                    HorizontalAlignment="Right"
 +                    HorizontalAlignment="Right" Panel.ZIndex="100"
@@ -192,25 +862,25 @@ index a80a85a..77f16aa 100644
 +                      SelectionChanged="GameModeDropdown_OnSelectionChanged" Width="255"
                        VerticalAlignment="Top" />
          </StackPanel>
-
+ 
 diff --git a/WheelWizard/Views/Pages/HomePage.axaml.cs b/WheelWizard/Views/Pages/HomePage.axaml.cs
-index f0b7ca8..6158c93 100644
+index f0b7ca8f..6158c935 100644
 --- a/WheelWizard/Views/Pages/HomePage.axaml.cs
 +++ b/WheelWizard/Views/Pages/HomePage.axaml.cs
 @@ -36,6 +36,9 @@ public partial class HomePage : UserControlBase
      [Inject]
      private ILauncherProvider LauncherProvider { get; set; } = null!;
-
+ 
 +    [Inject]
 +    private WheelWizard.Mods.IModsLaunchService VrMods { get; set; } = null!;
 +
      [Inject]
      private IRandomSystem RandomSystem { get; set; } = null!;
-
+ 
 @@ -93,8 +96,14 @@ public partial class HomePage : UserControlBase
          _trails = [HomeTrail1, HomeTrail2, HomeTrail3, HomeTrail4, HomeTrail5];
          RandomSystem.Random.Shared.Shuffle(_trails);
-
+ 
 -        _launcherTypes.Add(LauncherProvider.GetActiveLauncher());
 -        if (SettingsService.IsRecompModeActive())
 +        if (LocalVrLauncher.IsLocalBundle)
@@ -224,3 +894,66 @@ index f0b7ca8..6158c93 100644
              DolphinButton.IsVisible = false;
          else
              ApplyDolphinTrailColors();
+diff --git a/WheelWizard/Views/Pages/Settings/OtherSettings.axaml.cs b/WheelWizard/Views/Pages/Settings/OtherSettings.axaml.cs
+index 8675e203..daad00a0 100644
+--- a/WheelWizard/Views/Pages/Settings/OtherSettings.axaml.cs
++++ b/WheelWizard/Views/Pages/Settings/OtherSettings.axaml.cs
+@@ -20,7 +20,7 @@ public partial class OtherSettings : UserControlBase
+     public OtherSettings()
+     {
+         InitializeComponent();
+-        _settingsAreDisabled = !SettingsService.DolphinPathsSetupCorrectly();
++        _settingsAreDisabled = !SettingsService.PathsSetupCorrectly();
+         DisabledWarningText.IsVisible = _settingsAreDisabled;
+ 
+         // Recomp can be enabled with only a game image configured. Disable the Dolphin-only
+@@ -56,7 +56,8 @@ public partial class OtherSettings : UserControlBase
+         RecompSectionLabel.IsVisible = recompSupported;
+         RecompBorder.IsVisible = recompSupported;
+         if (recompSupported)
+-            EnableRecomp.IsChecked = SettingsService.Get<bool>(SettingsService.ENABLE_RECOMP);
++            EnableRecomp.IsChecked = SettingsService.IsRecompModeActive();
++        EnableRecomp.IsEnabled = !WheelWizard.Services.Launcher.LocalVrLauncher.IsLocalBundle;
+     }
+ 
+     private void RefreshRetroRewindVersion()
+@@ -77,6 +78,14 @@ public partial class OtherSettings : UserControlBase
+ 
+     private async void Reinstall_RetroRewind(object sender, RoutedEventArgs e)
+     {
++        if (WheelWizard.Services.Launcher.LocalVrLauncher.IsLocalBundle)
++        {
++            var result = await WheelWizard.Services.Launcher.LocalVrLauncher.CreateRetro().ReinstallRetro();
++            if (result.IsFailure)
++                await new MessageBoxWindow().SetTitleText("VR repair failed").SetInfoText(result.Error.Message).ShowDialog();
++            RefreshRetroRewindVersion();
++            return;
++        }
+         var progressWindow = new ProgressWindow();
+         progressWindow.Show();
+         await CustomDistributionSingletonService.RetroRewind.ReinstallAsync(progressWindow);
+diff --git a/WheelWizard/Views/Pages/Settings/RecompSettings.axaml.cs b/WheelWizard/Views/Pages/Settings/RecompSettings.axaml.cs
+index ab2c7aa9..29ddaa3b 100644
+--- a/WheelWizard/Views/Pages/Settings/RecompSettings.axaml.cs
++++ b/WheelWizard/Views/Pages/Settings/RecompSettings.axaml.cs
+@@ -60,7 +60,7 @@ public partial class RecompSettings : UserControlBase
+             var installFolder = RecompEnvironment?.InstallFolderPath ?? PathManager.RecompInstallFolderPath;
+             InstallLocationText.Text = installFolder;
+             OpenInstallFolder.IsEnabled = installed && Directory.Exists(installFolder);
+-            UninstallButton.IsEnabled = installed;
++            UninstallButton.IsEnabled = installed && !WheelWizard.Services.Launcher.LocalVrLauncher.IsLocalBundle;
+             WiiCompiledVersionText.Text = t("helper_text.installed_version", installed ? t("state.loading") : t("state.unknown"));
+             if (installed)
+                 _ = RefreshWiiCompiledVersionAsync();
+@@ -114,6 +114,11 @@ public partial class RecompSettings : UserControlBase
+         // selection; it is replaced the moment the user picks a real one.
+         var currentApi = SettingsService.Get<string>(SettingsService.RECOMP_GRAPHICS_API);
+         GraphicsApiDropdown.SelectedIndex = RecompVideoConfig.OfferedGraphicsApis.ToList().IndexOf(currentApi);
++        if (WheelWizard.Services.Launcher.LocalVrLauncher.IsLocalBundle)
++        {
++            GraphicsApiDropdown.IsEnabled = false;
++            ToolTip.SetTip(GraphicsApiDropdown, "The VR renderer requires D3D12. Eye resolution is configured in the in-game VR settings.");
++        }
+ 
+         ShowFps.IsChecked = SettingsService.Get<bool>(SettingsService.RECOMP_SHOW_FPS);
+         PreventStutters.IsChecked = SettingsService.Get<bool>(SettingsService.RECOMP_PREVENT_STUTTERS);

@@ -126,6 +126,10 @@ struct MkwVRPolicySnapshot {
     // the current presentation mode, so a transient scene/camera mismatch
     // cannot accept an immersive packet from an adjacent asynchronous frame.
     uint64_t content_tag = 0;
+    // Reprojection of an already completed image does not read the new guest
+    // camera. Keep it visible across incomplete scene/camera publication, but
+    // invalidate it on actual scene, settings or session changes.
+    uint64_t display_content_tag = 0;
 
     // The scale headset translation and IPD are converted at. Head offsets in
     // metres must use the same value, or the camera and the world disagree.

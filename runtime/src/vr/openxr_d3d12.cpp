@@ -412,7 +412,10 @@ public:
         }
         bool ok;
         const auto& image = cached_frame_;
-        if (!show_cached || !cached_frame_valid_ || !frame.xr_frame.should_render || !frame.xr_frame.views_valid) {
+        // Projection layers below use the cached image's render poses. A
+        // transient invalid current pose must not turn that valid image black.
+        // Still honor the runtime's explicit request to hide application layers.
+        if (!show_cached || !cached_frame_valid_ || !frame.xr_frame.should_render) {
             ok = runtime_->EndFrameWithoutLayers(frame.xr_frame);
         } else if (image.presentation.mode == OpenXRD3D12FrameMode::VirtualScreen && !image.presentation.anchored) {
             XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -923,4 +926,3 @@ const std::string& OpenXRD3D12Backend::LastError() const { return m_impl->LastEr
 } // namespace mkw::vr
 
 #endif // defined(MKW_ENABLE_OPENXR) && defined(_WIN32)
-

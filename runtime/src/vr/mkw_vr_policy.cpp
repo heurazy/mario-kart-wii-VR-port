@@ -272,6 +272,7 @@ MkwVRPolicySnapshot MkwVRPolicyGetSnapshot() noexcept {
         g_policy.first_person_engaged && snapshot.presentation == VRPresentationMode::ImmersiveRace;
     snapshot.safety_generation = g_policy.safety_generation;
     snapshot.content_tag = MakeContentTag(g_policy, snapshot.presentation);
+    snapshot.display_content_tag = MakeContentTag(g_policy, SelectStablePresentation(g_policy));
     return snapshot;
 }
 

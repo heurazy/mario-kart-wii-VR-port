@@ -745,19 +745,25 @@ std::optional<PendingStereoSink> run_stereo_sink(wgpu::CommandEncoder& encoder, 
       .logicalFrame = logicalFrame,
       .mode = mode,
   };
+  // The device probe selected this transform using GPU pixels, not scene contents.
+  const int orientation = mode == AURORA_STEREO_FRAME_IMMERSIVE_REPLAY
+      ? webgpu::g_RaceOutputCopyMode : 0;
+  const bool correction = mode == AURORA_STEREO_FRAME_IMMERSIVE_REPLAY && webgpu::g_RaceOutputNeedsCopy;
   for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
     const auto& output = g_stereoEyeTargets[eye].output();
     const webgpu::TextureWithSampler* image=&output;
     const auto size=g_stereoOutputSizes[eye];
-    if(output.size.width!=size[0] || output.size.height!=size[1]) {
+    // Apply only to the final race image, after world, hands and HUD. Menus
+    // retain their independent, room-anchored orientation.
+    if(correction || output.size.width!=size[0] || output.size.height!=size[1]) {
       auto& upscale=g_stereoUpscaled[eye];
       if(!upscale.texture || upscale.size.width!=size[0] || upscale.size.height!=size[1] || upscale.format!=output.format)
         upscale=webgpu::create_render_texture(size[0],size[1],false);
       auto& binding=g_stereoUpscaleBindings[eye];
       if(!binding) binding=webgpu::create_copy_bind_group(output);
       const wgpu::RenderPassColorAttachment attachment{.view=upscale.view,.loadOp=wgpu::LoadOp::Clear,.storeOp=wgpu::StoreOp::Store};
-      const wgpu::RenderPassDescriptor pd{.label="VR adaptive resolution upscale",.colorAttachmentCount=1,.colorAttachments=&attachment};
-      auto pass=encoder.BeginRenderPass(&pd);pass.SetPipeline(webgpu::g_CopyPipeline);pass.SetBindGroup(0,binding);pass.Draw(3);pass.End();
+      const wgpu::RenderPassDescriptor pd{.label="VR output orientation and upscale",.colorAttachmentCount=1,.colorAttachments=&attachment};
+      auto pass=encoder.BeginRenderPass(&pd);pass.SetPipeline(webgpu::g_OrientedCopyPipelines[orientation]);pass.SetBindGroup(0,binding);pass.Draw(3);pass.End();
       image=&upscale;
     }
     frame.eyes[eye] = {

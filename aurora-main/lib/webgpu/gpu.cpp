@@ -1,4 +1,5 @@
 #include "gpu.hpp"
+#include "orientation_probe.hpp"
 
 #include <array>
 #include <algorithm>
@@ -67,6 +68,9 @@ TextureWithSampler g_depthBuffer;
 // EFB -> XFB copy pipeline
 static wgpu::BindGroupLayout g_CopyBindGroupLayout;
 wgpu::RenderPipeline g_CopyPipeline;
+std::array<wgpu::RenderPipeline, 4> g_OrientedCopyPipelines;
+bool g_RaceOutputNeedsCopy=false;
+int g_RaceOutputCopyMode=0;
 wgpu::BindGroup g_CopyBindGroup;
 static bool g_presentSourceOverrideActive = false;
 static wgpu::BindGroup g_presentSourceOverrideBindGroup;
@@ -372,6 +376,8 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 };
 
+override flip_x: bool = false;
+override flip_y: bool = false;
 var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(
     vec2(-1.0, 1.0),
     vec2(-1.0, -3.0),
@@ -388,6 +394,8 @@ fn vs_main(@builtin(vertex_index) vtxIdx: u32) -> VertexOutput {
     var out: VertexOutput;
     out.pos = vec4<f32>(pos[vtxIdx], 0.0, 1.0);
     out.uv = uvs[vtxIdx];
+    if (flip_x) { out.uv.x = 1.0 - out.uv.x; }
+    if (flip_y) { out.uv.y = 1.0 - out.uv.y; }
     return out;
 }
 
@@ -441,7 +449,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
       .bindGroupLayouts = &g_CopyBindGroupLayout,
   };
   auto pipelineLayout = g_device.CreatePipelineLayout(&layoutDescriptor);
-  const wgpu::RenderPipelineDescriptor pipelineDescriptor{
+  wgpu::RenderPipelineDescriptor pipelineDescriptor{
       .layout = pipelineLayout,
       .vertex =
           wgpu::VertexState{
@@ -460,6 +468,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
       .fragment = &fragmentState,
   };
   g_CopyPipeline = g_device.CreateRenderPipeline(&pipelineDescriptor);
+  g_OrientedCopyPipelines[0] = g_CopyPipeline;
+  for (int orientation = 1; orientation < 4; ++orientation) {
+    const std::array constants{
+        wgpu::ConstantEntry{.key="flip_x", .value=orientation >= 2 ? 1.0 : 0.0},
+        wgpu::ConstantEntry{.key="flip_y", .value=orientation <= 2 ? 1.0 : 0.0}};
+    pipelineDescriptor.vertex.constantCount = constants.size();
+    pipelineDescriptor.vertex.constants = constants.data();
+    g_OrientedCopyPipelines[orientation] = g_device.CreateRenderPipeline(&pipelineDescriptor);
+  }
 }
 
 wgpu::BindGroup create_copy_bind_group(wgpu::TextureView sourceView, wgpu::Sampler sampler) {
@@ -852,6 +869,15 @@ bool initialize(AuroraBackend auroraBackend) {
       .maxTextureDimension2D = maxTextureDimension2D,
   };
   create_copy_pipeline();
+  // Calibrate once for this device. Never infer inversion from headset pose,
+  // camera animation, runtime brand, or the user's GPU scheduling settings.
+  const auto orientation=probe_output_orientation(g_instance,g_device,g_graphicsConfig.surfaceConfiguration.format,g_OrientedCopyPipelines);
+  g_RaceOutputNeedsCopy=orientation.valid && orientation.needsCopy;
+  g_RaceOutputCopyMode=orientation.valid?orientation.copyMode:0;
+  if(orientation.valid)
+    Log.info("VR GPU orientation probe: direct={}, output-copy={}",orientation.needsCopy?"inverted":"upright",orientation.copyMode);
+  else
+    Log.warn("VR GPU orientation probe inconclusive; preserving image orientation");
   {
     window::SurfaceLock surfaceLock;
     resize_swapchain(size.fb_width, size.fb_height, size.native_fb_width, size.native_fb_height, true);
@@ -905,6 +931,7 @@ void shutdown() {
   g_initialized.store(false, std::memory_order_release);
   g_CopyBindGroupLayout = {};
   g_CopyPipeline = {};
+  g_OrientedCopyPipelines = {};
   g_CopyBindGroup = {};
   g_frameBuffer = {};
   g_frameBufferResolved = {};

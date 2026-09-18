@@ -1,4 +1,6 @@
 #include "settings_overlay.h"
+#include "physical_wheel.h"
+#include "abi_bridge.h"
 #include "audio_backend.h"
 #include "controller_mapping_wizard.h"
 #include "game_graphics_options.h"
@@ -485,6 +487,7 @@ void DrawWiiRemoteSettings(uint32_t selectedGamePort) {
 
 // Controller settings menu: port selection, controller assignment and button mapping.
 void DrawControllerSettings() {
+    if (ImGui::CollapsingHeader("Hardware wheel and pedals")) physical_wheel::DrawSettings();
     for (int port = 0; port < PAD_MAX_CONTROLLERS; ++port) {
         const std::string label = "Port " + std::to_string(port + 1);
         ImGui::RadioButton(label.c_str(), &g_controllerPort, port);
@@ -795,7 +798,7 @@ void DrawVrStickSettings(const mkw::vr::QuestInput& input) {
     if (ImGui::SliderFloat("Travel for full steering", &outer, 60, 100, "%.0f %%")) {
         g_vrStickCalibration.outer = outer / 100; changed = true;
     }
-    ImGui::TextWrapped("Increase the deadzone if steering moves while the stick is at rest. Reduce travel if pushing the stick fully does not reach 100 %.");
+    ImGui::TextWrapped("Increase the deadzone if steering moves while the stick is at rest. Reduce travel if pushing the stick fully does not reach 100 %%.");
     if (ImGui::Button("Reset stick settings")) {
         g_vrStickCalibration = {}; changed = true; message = "Stick settings reset.";
     }
@@ -864,7 +867,7 @@ void DrawVrSettings() {
                 ImGui::TextWrapped("The resolution is saved for the next launch. A sharper image requires more GPU power.");
                 bool adaptive=RuntimeConfigFile::Get().vrAdaptiveResolution;
                 if(ImGui::Checkbox("Adaptive resolution (experimental)",&adaptive)) RuntimeConfigFile::SetVrAdaptiveResolution(adaptive);
-                ImGui::TextWrapped("Optional: lowers internal race resolution to 70-100% of the selected quality when new images fall behind, then upscales to the headset. Slow steps reduce oscillation. Does not fix CPU bottlenecks; disabled by default.");
+                ImGui::TextWrapped("Optional: lowers internal race resolution to 70-100%% of the selected quality when new images fall behind, then upscales to the headset. Slow steps reduce oscillation. Does not fix CPU bottlenecks; disabled by default.");
                 if (ImGui::Checkbox("Sharp image (disable Wii copy filter)", &g_disableCopyFilter)) {
                     aurora_set_disable_copy_filter(g_disableCopyFilter);
                     RuntimeConfigFile::SetDisableCopyFilter(g_disableCopyFilter);
@@ -969,6 +972,10 @@ void DrawVrSettings() {
             }
             if (ImGui::BeginTabItem("Stick")) {
                 DrawVrStickSettings(input);
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Hardware wheel")) {
+                physical_wheel::DrawSettings();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Driving")) {

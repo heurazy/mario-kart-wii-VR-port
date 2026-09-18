@@ -31,7 +31,10 @@ clean PAL `RMCP01` disc image and compile the game locally.
   VR settings.
 - Configurable eye resolution, sharpness, refresh-rate preference, adaptive resolution, world scale,
   HUD placement, camera trim, steering response, grab assistance, deadzone, haptics, and diagnostics.
-- Retro Rewind VR support through the integrated WheelWizard launcher.
+- Retro Rewind VR support through WheelWizard, with pack updates, patch preparation,
+  compiled-product repair, and access to the VR installation's saves, friends and Miis.
+  See [WheelWizard feature coverage](docs/WHEELWIZARD-VR.md) for the local integration
+  and its limits; these changes are not yet included in the published v1.0 release.
 
 ## Requirements
 
@@ -70,6 +73,31 @@ preserving personal and compiled game data.
 
 No release contains a ROM or a translated game executable. Compilation is intentionally performed
 locally from the disc image you select.
+
+## USB steering wheels and pedals (source build)
+
+Open **VR settings > Hardware wheel** (also available in desktop controller settings).
+Select the steering device and axis; record full left, full right and center. Select each
+pedal's device and axis, then record its released and fully pressed positions. Separate USB
+pedals, inverted axes and combined pedal axes are supported through SDL's raw joystick input;
+the device does not need an Xbox/gamepad mapping. For a combined axis, select the same axis for
+both pedals and record their opposite pressed positions.
+
+Assign the **right paddle to drift** and **left paddle to items**, then enable the physical wheel.
+Paddle numbers vary by driver, so these assignments require pressing each paddle during setup.
+Optional hardware buttons provide tricks/wheelies, confirm and pause. The brake pedal brakes,
+then reverses, in every race camera. It takes priority over acceleration and drift. Mario Kart's
+acceleration remains a digital game action, even with an analog pedal. VR controllers remain
+available for menu navigation, camera selection, pause and item aiming. The visible cockpit wheel
+follows hardware steering. Configuration is saved beside the active config in `PhysicalWheel.toml`.
+
+Feedback is **off by default**. Optional light vibration follows the game's original rumble
+events, including curbs only where the game emits rumble. Effects are short and strength is
+capped at 15%; no constant torque, spring or centering effect is requested. Rumble support depends
+on the driver; lack of rumble does not prevent driving. This is not simulated tire-force feedback.
+An incomplete/disconnected setup gives neutral race input. Close options and release held buttons
+and pedals before driving. Hardware/driver compatibility needs testing; no universal device support
+is claimed. These additions require rebuilding and are not in the existing v1.0 download.
 
 ## Quest and OpenXR controls
 

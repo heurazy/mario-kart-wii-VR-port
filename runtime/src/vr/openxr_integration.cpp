@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "physical_wheel.h"
 
 #if defined(_WIN32) && !defined(NOMINMAX)
 #define NOMINMAX
@@ -428,6 +429,7 @@ private:
         Clock::time_point pending_start{};
         auto stats_start = Clock::now();
         uint32_t displays = 0, images = 0, ticks = 0, cancellations = 0;
+        uint32_t runtime_hidden = 0, invalid_views = 0, policy_gaps = 0, cache_misses = 0;
         double period_ns = 0.0;
         bool fatal = false;
         uint64_t observed_session = 0;
@@ -535,7 +537,11 @@ private:
             display.presentation.anchored=runtime_->PanelAnchored();
             if (runtime_->ConsumeCameraClick() && immersive) MkwVRCycleCamera();
             UpdateDrivingFrame(display, immersive, policy.EffectiveUnitsPerMeter());
-            if (!delivery.PendingToken() && display.xr_frame.should_render && display.xr_frame.views_valid) {
+            const bool coherent = policy.content_tag == policy.display_content_tag;
+            if (!coherent) ++policy_gaps;
+            if (!display.xr_frame.should_render) ++runtime_hidden;
+            if (display.xr_frame.should_render && !display.xr_frame.views_valid) ++invalid_views;
+            if (!delivery.PendingToken() && coherent && display.xr_frame.should_render && display.xr_frame.views_valid) {
                 if (!backend_->BeginSubmission(display)) {
                     SetError(backend_->LastError());
                     backend_->FinishDisplayFrame(display, false);
@@ -548,8 +554,11 @@ private:
                 BuildPublishedFrame(pending, immersive, policy.EffectiveUnitsPerMeter(), policy.content_tag);
                 published_.store(&published_frame_, std::memory_order_release);
             }
-            const bool show = delivery.CanDisplay(policy.content_tag, session) &&
-                              display.xr_frame.should_render && display.xr_frame.views_valid;
+            // A fresh pose is required to render, not to reproject the last
+            // completed image with its original, valid render poses.
+            const bool show = delivery.CanDisplay(policy.display_content_tag, session) &&
+                              display.xr_frame.should_render;
+            if (display.xr_frame.should_render && !show) ++cache_misses;
             if (!backend_->FinishDisplayFrame(display, show)) {
                 SetError(backend_->LastError());
                 fatal = true;
@@ -574,9 +583,14 @@ private:
                     << ", runtime-hz=" << (period_ns > 0 ? 1.0e9 * ticks / period_ns : 0.0)
                     << ", interval-p95-ms=" << displayIntervals.Percentile(.95f)
                     << ", interval-p99-ms=" << displayIntervals.Percentile(.99f)
-                    << ", canceled=" << cancellations << std::endl;
+                    << ", canceled=" << cancellations
+                    << ", runtime-hidden=" << runtime_hidden
+                    << ", invalid-views=" << invalid_views
+                    << ", policy-gaps=" << policy_gaps
+                    << ", cache-misses=" << cache_misses << std::endl;
                 stats_start = Clock::now();
                 displays = images = ticks = cancellations = 0;
+                runtime_hidden = invalid_views = policy_gaps = cache_misses = 0;
                 period_ns = 0.0;
             }
         }
@@ -889,18 +903,25 @@ private:
         }
         if (cockpit.nativeWheel || cockpit.bike)
             for (auto& hand : hands) hand = drivingGeometry.ToWheel(hand);
-        const auto wheel = wheel_.Update(hands, cockpit.active, dt,
+        float hardwareSteering = 0;
+        const bool hardwareWheel = physical_wheel::SteeringSnapshot(hardwareSteering);
+        auto wheel = wheel_.Update(hands, cockpit.active && !hardwareWheel, dt,
             cockpit.nativeWheel || cockpit.bike ? drivingGeometry.radius : SteeringWheel::Radius,cockpit.bike,
             RuntimeConfigFile::VrWheelTuning());
         // A kart rim follows full hand rotation; handlebars retain their
         // limited visual travel, while the input accumulator keeps overtravel.
+        if (hardwareWheel) {
+            const auto tuning = RuntimeConfigFile::VrWheelTuning();
+            wheel.steering = hardwareSteering;
+            wheel.visualAngle = hardwareSteering * (cockpit.bike ? tuning.bikeDegrees : tuning.kartDegrees) * 0.01745329252f;
+        }
         cockpit.wheelAngle = wheel.visualAngle;
         for (size_t hand=0;hand<2;++hand)
             if (wheel.held[hand]!=last_held_[hand] && cockpit.active && RuntimeConfigFile::VrWheelTuning().haptics)
                 runtime_->PulseGrip(hand,wheel.held[hand]);
         last_held_=wheel.held;
         for (int hand = 0; hand < 2; ++hand) cockpit.hands[hand].held = wheel.held[hand];
-        runtime_->PublishDrivingInput(cockpit.active, wheel.steering, wheel.held[0] || wheel.held[1],cockpit.wheelAngle);
+        runtime_->PublishDrivingInput(cockpit.active, wheel.steering, hardwareWheel || wheel.held[0] || wheel.held[1],cockpit.wheelAngle);
     }
 
     void BuildPublishedFrame(const OpenXRD3D12Frame& source, bool immersive,
