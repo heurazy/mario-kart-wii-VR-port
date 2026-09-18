@@ -13,7 +13,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
 - resolve upside-down screen for some users : in progress (pushed but not in a release or tested)
 - resolve freezes every 2 seconds for some users : in progress
 - sim racing steering wheel compatibility : in progress (pushed but not in a release or tested)
-- multiplayer: in progress
+- multiplayer: in progress(pushed but it have some bugs)
 - fix low FPS in menu : planned
 - new hand models : planned
 - fix character height : planned
