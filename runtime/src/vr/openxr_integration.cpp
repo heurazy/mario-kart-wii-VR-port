@@ -508,6 +508,11 @@ private:
                 WaitForStopOrDelay(std::chrono::milliseconds(5));
                 continue;
             }
+            if(!delivery.PendingToken() && runtime_->HasStartupMenuRecenter() &&
+               runtime_->ApplyStartupMenuRecenter()) {
+                invalidate();
+                ResetTrackingOrigin();
+            }
             auto policy = MkwVRPolicyGetSnapshot();
             OpenXRD3D12Presentation presentation{};
             presentation.mode = policy.presentation == VRPresentationMode::ImmersiveRace
@@ -647,6 +652,8 @@ private:
                 WaitForStopOrDelay(std::chrono::milliseconds(5));
                 continue;
             }
+            if(runtime_->HasStartupMenuRecenter() && runtime_->ApplyStartupMenuRecenter())
+                ResetTrackingOrigin();
 
             const MkwVRPolicySnapshot policy = MkwVRPolicyGetSnapshot();
             if ((!presentation_logged || policy.presentation != logged_presentation) &&

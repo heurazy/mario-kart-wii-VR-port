@@ -169,6 +169,9 @@ public:
     // Recreates the application reference space with a caller-provided offset.
     // This is the application-side recenter primitive; call only between frames.
     bool ResetAppSpace(const XrPosef& pose_in_reference_space);
+    // Complete the one-time startup recenter only between compositor frames.
+    bool HasStartupMenuRecenter() const { return m_startup_menu_recenter_pending; }
+    bool ApplyStartupMenuRecenter();
 
     // Called only on the XR owner thread, at the predicted display time.
     void PollControllers(XrTime time, const OpenXRFrame* frame = nullptr);
@@ -230,6 +233,9 @@ private:
     bool m_panel_anchored = false;
     MenuAnchorStability m_panel_stability;
     XrPosef m_panel_origin{{0,0,0,1},{0,0,0}};
+    bool m_startup_menu_recenter_done = false;
+    bool m_startup_menu_recenter_pending = false;
+    XrPosef m_startup_menu_recenter_pose{{0,0,0,1},{0,0,0}};
     enum class FramePhase {
         Idle,
         Waited,

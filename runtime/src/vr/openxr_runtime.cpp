@@ -749,7 +749,19 @@ void OpenXRRuntime::PollControllers(XrTime time, const OpenXRFrame* frame) {
                 m_panel_origin=head;
                 m_panel_origin.orientation={0,std::sin(yaw*.5f),0,std::cos(yaw*.5f)};
                 m_panel_anchored=true;
-                Log(OpenXRLogLevel::Info,"VR menu anchored from stable stereo view poses");
+                std::ostringstream message;
+                message << "VR menu anchored: head=(" << head.position.x << ','
+                    << head.position.y << ',' << head.position.z << "), yaw=" << yaw;
+                Log(OpenXRLogLevel::Info,message.str());
+                if(!m_startup_menu_recenter_done) {
+                    // The initial LOCAL origin can still be provisional when
+                    // SteamVR first focuses this application. Re-create the
+                    // application space around the already-validated, upright
+                    // headset pose, as a user recenter would do.
+                    m_startup_menu_recenter_pose=m_panel_origin;
+                    m_startup_menu_recenter_pending=true;
+                    m_startup_menu_recenter_done=true;
+                }
             }
         } else m_panel_stability.Reset();
     }
@@ -1230,6 +1242,14 @@ bool OpenXRRuntime::ResetAppSpace(const XrPosef& pose_in_reference_space) {
     return true;
 }
 
+bool OpenXRRuntime::ApplyStartupMenuRecenter() {
+    if(!m_startup_menu_recenter_pending) return false;
+    if(!ResetAppSpace(m_startup_menu_recenter_pose)) return false;
+    m_startup_menu_recenter_pending=false;
+    Log(OpenXRLogLevel::Info,"VR startup menu origin recentered in application space");
+    return true;
+}
+
 bool OpenXRRuntime::ConsumeAppSpaceChangesThrough(XrTime display_time) {
     bool consumed = false;
     std::erase_if(m_pending_app_space_changes,
@@ -1328,6 +1348,8 @@ void OpenXRRuntime::DestroyReferenceSpaces() {
 }
 
 void OpenXRRuntime::ResetSessionState() {
+    m_startup_menu_recenter_done=false;
+    m_startup_menu_recenter_pending=false;
     m_panel_anchored=false;
     m_panel_stability.Reset();
     m_session_state = XR_SESSION_STATE_UNKNOWN;
