@@ -220,7 +220,10 @@ See [OPENXR.md](OPENXR.md) for the implementation details, configuration keys, c
 and validation notes.
 
 ## Credits
-- **[Wiicompiled VR](https://github.com/iChris4/Wiicompiled_VR)** by Ichris4, all the openxr render system was taken from his project 
+- **[Wiicompiled VR](https://github.com/iChris4/Wiicompiled_VR)** by **iChris4**: 
+  This project originated as a fork of iChris4's pioneering OpenXR VR port of WiiCompiled. 
+  The core OpenXR integration, stereo rendering pipeline, and initial VR translation hooks 
+  were built by iChris4.
 - **[WheelWizard](https://github.com/TeamWheelWizard/WheelWizard)** by Team WheelWizard, integrated
   as the local launcher and Retro Rewind front end.
 - **[BigWalkVRInstaller](https://github.com/CircuitLord/BigWalkVRInstaller)** by CircuitLord, whose
