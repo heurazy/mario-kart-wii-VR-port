@@ -704,8 +704,10 @@ void OpenXRRuntime::PollControllers(XrTime time, const OpenXRFrame* frame) {
          panelPolicy.scene.mode!=VRSceneMode::Race);
     if (!showPanel) { m_panel_anchored=false;m_panel_stability.Reset(); }
     else {
-        const auto flags=XR_VIEW_STATE_POSITION_VALID_BIT|XR_VIEW_STATE_ORIENTATION_VALID_BIT|
-            XR_VIEW_STATE_POSITION_TRACKED_BIT|XR_VIEW_STATE_ORIENTATION_TRACKED_BIT;
+        // SteamVR can provide usable stereo poses without marking both tracked
+        // bits, especially during startup or after a temporary focus loss.
+        // The valid bits and a coherent upright pose are sufficient here.
+        const auto flags=XR_VIEW_STATE_POSITION_VALID_BIT|XR_VIEW_STATE_ORIENTATION_VALID_BIT;
         if(frame && frame->predicted_display_time==time && frame->views_valid &&
            (frame->view_state_flags&flags)==flags) {
             // Use the exact eye poses that render this frame: a separate VIEW
@@ -730,6 +732,7 @@ void OpenXRRuntime::PollControllers(XrTime time, const OpenXRFrame* frame) {
                 m_panel_origin=head;
                 m_panel_origin.orientation={0,std::sin(yaw*.5f),0,std::cos(yaw*.5f)};
                 m_panel_anchored=true;
+                Log(OpenXRLogLevel::Info,"VR menu anchored from stable stereo view poses");
             }
         } else { m_panel_anchored=false; m_panel_stability.Reset(); }
     }

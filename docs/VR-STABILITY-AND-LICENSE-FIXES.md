@@ -46,13 +46,15 @@ blocked. No Mii Channel or fabricated replacement Mii is required.
 ## Validation
 
 Startup menu anchoring uses the same tracked eye poses as rendering, with a
-400 ms settling interval (position within 8 cm, heading within 15 degrees).
-Invalid, untracked or upside-down startup poses cannot establish the anchor.
+400 ms settling interval (position within 40 cm, heading within 75 degrees).
+Invalid or upside-down startup poses cannot establish the anchor. SteamVR can
+report usable poses before setting both tracking-status bits, so valid stereo
+poses are accepted after the settling interval.
 Loss of tracking/focus, recenter and session restart clear it. An already
 anchored menu remains stationary during normal head movement. Unanchored
 cached images remain in view space instead of adopting a newer live anchor.
 Regression cases cover a startup height jump, heading change, tracking
-recovery, reset and invalid coordinates. Visual verification in a headset
+recovery, normal head movement, reset and invalid coordinates. Visual verification in a headset
 is still required for the affected startup configuration.
 
 Native regression tests cover slow image delivery through nine seconds,

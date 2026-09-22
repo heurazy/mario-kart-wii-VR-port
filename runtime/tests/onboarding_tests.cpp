@@ -30,7 +30,7 @@ int main() {
     MenuAnchorStability anchor;
     UiHandPose head; head.valid=true; head.position={0,1.65f,0};
     check(!anchor.Update(head,1000000000),"first tracked pose cannot anchor immediately");
-    head.position[1]=.2f;
+    head.position[1]=1.1f;
     check(!anchor.Update(head,1400000000),"startup height jump restarts settling");
     check(!anchor.Update(head,1700000000),"new origin needs its own stable interval");
     check(anchor.Update(head,1800000000),"stable tracked pose anchors");
@@ -45,6 +45,11 @@ int main() {
     head.forward={1,0,0};
     check(!anchor.Update(head,3000000000),"turn during startup restarts settling");
     check(anchor.Update(head,3400000000),"stable new heading anchors");
+    anchor.Reset();
+    head.position={0,1.1f,0}; head.forward={0,0,-1};
+    check(!anchor.Update(head,3500000000),"menu begins settling while head moves");
+    head.position[0]=.12f;
+    check(anchor.Update(head,3900000000),"normal head movement does not block the menu");
     head.position[0]=std::numeric_limits<float>::quiet_NaN();
     check(!anchor.Update(head,3500000000),"invalid coordinates rejected");
     TutorialFlow flow;

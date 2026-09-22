@@ -3,8 +3,9 @@
 #include "vr/onboarding.h"
 
 namespace mkw::vr {
-// Wait for a stationary, upright tracked pose, rather than accepting the
-// placeholder origin some runtimes report while the headset wakes up.
+// Wait for a coherent, upright pose, rather than accepting the placeholder
+// origin some runtimes report while the headset wakes up. Natural head motion
+// must not prevent a menu from appearing indefinitely.
 class MenuAnchorStability {
 public:
     void Reset() { since_ = 0; }
@@ -24,7 +25,7 @@ public:
             distance2+=delta*delta;
             direction+=head.forward[i]*candidate_.forward[i];
         }
-        if(!since_ || time<since_ || distance2>.0064f || direction<.9659258f) {
+        if(!since_ || time<since_ || distance2>.16f || direction<.258819f) {
             candidate_=head; since_=time;
         }
         return time-since_>=400000000;
