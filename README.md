@@ -10,10 +10,10 @@ clean PAL `RMCP01` disc image and compile the game locally.
 
 [Download the latest release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/latest)
 ## Roadmap
-- resolve upside-down screen for some users : in progress (pushed but not in a release or tested)
-- resolve freezes every 2 seconds for some users : in progress
-- sim racing steering wheel compatibility : in progress (pushed but not in a release or tested)
-- multiplayer: in progress(pushed but it have some bugs)
+- automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
+- periodic Wii Remote scan freezes: scanning disabled by default in v1.1, with an opt-in VR setting
+- sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
+- multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing depends on Retro WFC availability
 - fix low FPS in menu : planned
 - new hand models : planned
 - fix character height : planned
