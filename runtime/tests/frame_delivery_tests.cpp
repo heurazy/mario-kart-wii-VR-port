@@ -17,17 +17,24 @@ int main() {
         require(!state.Complete(1), "duplicate callback accepted");
         require(state.CanDisplay(7, 1), "ready image absent");
         require(!state.CanDisplay(8, 1) && !state.CanDisplay(7, 2), "image escaped its scene/session");
-        require(state.Start(2, 7, 1), "next GPU job rejected");
+        require(!state.CanDisplayWhileUiPending(8, 1), "old image shown without a pending UI image");
+        require(state.Start(2, 8, 1), "UI transition job rejected");
+        require(state.CanDisplayWhileUiPending(8, 1), "old image went black while UI image was pending");
+        require(!state.CanDisplayWhileUiPending(8, 2), "old image escaped its XR session");
+        require(state.Complete(2), "UI transition image rejected");
+        require(state.CanDisplay(8, 1), "completed UI image did not replace old image");
+        require(!state.CanDisplayWhileUiPending(8, 1), "old image survived UI completion");
+        require(state.Start(3, 8, 1), "next GPU job rejected");
         for (int tick = 0; tick < 90; ++tick) {
-            require(state.CanDisplay(7, 1), "display consumed cached image while GPU job pending");
-            require(state.PendingToken() == 2, "display mutated GPU ownership");
+            require(state.CanDisplay(8, 1), "display consumed cached image while GPU job pending");
+            require(state.PendingToken() == 3, "display mutated GPU ownership");
         }
         state.Cancel();
-        require(!state.PendingToken() && !state.CanDisplay(7, 1), "cancel left an unwritten released image visible");
-        state.Start(3, 8, 2);
+        require(!state.PendingToken() && !state.CanDisplay(8, 1), "cancel left an unwritten released image visible");
+        state.Start(4, 8, 2);
         state.InvalidateCache();
-        require(state.PendingToken() == 3, "cache invalidation canceled live GPU work");
-        state.Complete(3);
+        require(state.PendingToken() == 4, "cache invalidation canceled live GPU work");
+        state.Complete(4);
         require(state.CanDisplay(8, 2) && !state.CanDisplay(7, 1), "new session image not isolated");
 
         // One second on a 180-step timeline: game image completion every three

@@ -356,21 +356,28 @@ void AdvanceRetrace(CpuContext* ctx, Clock::time_point retraceStamp, bool servic
     }
 
     // VISetBlack(TRUE) keeps frame submission running but shows only the clear color: GX render work is
-    // skipped and Aurora's end_frame() clears to black, matching the hardware manual's "signal continues,
-    // pixels go black" behavior. When not black, submission waits for hasXfbReady (GXCopyDisp done).
+    // skipped and Aurora's end_frame() clears to black. An active VR panel must
+    // still be drawn over that clear color. A paused guest may also stop calling
+    // GXCopyDisp entirely; keep producing panel frames at retrace in that case.
+    // Never seal an unfinished GX frame just to refresh the panel.
     if (serviceAurora && !s_presentSequenceActive.load(std::memory_order_acquire)) {
         const bool frameActive = g_auroraFrameActive.load(std::memory_order_acquire);
         const bool xfbMatches = (readyXfb != 0 && readyXfb == currentFb);
         const bool shouldPresentXfb = hasXfbReady && !isBlack && xfbMatches;
         const bool shouldPresentBlack = isBlack && frameActive;
-        const bool shouldSubmit = frameActive && (shouldPresentXfb || shouldPresentBlack);
+        const bool vrPanelVisible = mkw::vr::MkwVRPolicyGetSnapshot().settings_visible;
+        const bool shouldPresentPanelOnly = vrPanelVisible && frameActive && !isBlack &&
+            !hasXfbReady && !g_auroraFrameHadWork.load(std::memory_order_acquire);
+        const bool shouldSubmit = frameActive &&
+            (shouldPresentXfb || shouldPresentBlack || shouldPresentPanelOnly);
 
         if (shouldSubmit) {
-            if (!isBlack || settings_overlay::StartupScreenVisible()) {
+            if (!isBlack || settings_overlay::StartupScreenVisible() || vrPanelVisible) {
                 // Normal presentation: draw overlay on top of GX content
                 settings_overlay::Draw();
             }
-            // Outside startup, VI black remains a pure black presentation.
+            // Outside startup and an explicit VR panel, VI black remains a
+            // pure black presentation.
             // Unpaced: this present already runs in retrace context.
             VI_HLE_PresentFrame(shouldPresentXfb, false);
         } else if (g_auroraFrameHadWork.load(std::memory_order_acquire) && !shouldPresentXfb && !isBlack) {

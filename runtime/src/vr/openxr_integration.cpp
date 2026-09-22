@@ -430,6 +430,7 @@ private:
         auto stats_start = Clock::now();
         uint32_t displays = 0, images = 0, ticks = 0, cancellations = 0;
         uint32_t runtime_hidden = 0, invalid_views = 0, policy_gaps = 0, cache_misses = 0;
+        bool panel_was_visible = false;
         double period_ns = 0.0;
         bool fatal = false;
         uint64_t observed_session = 0;
@@ -535,6 +536,14 @@ private:
             }
             policy = MkwVRPolicyGetSnapshot();
             const bool immersive = policy.presentation == VRPresentationMode::ImmersiveRace;
+            if (policy.settings_visible != panel_was_visible) {
+                panel_was_visible = policy.settings_visible;
+                RT_LOG(RT_TAG_RUNTIME) << "[mkw-vr] VR panel "
+                    << (panel_was_visible ? "opened" : "closed")
+                    << ", presentation=" << (immersive ? "immersive" : "virtual-screen")
+                    << ", content-tag=" << policy.content_tag
+                    << ", display-tag=" << policy.display_content_tag << std::endl;
+            }
             display.presentation.mode = immersive ? OpenXRD3D12FrameMode::ImmersiveProjection
                                                    : OpenXRD3D12FrameMode::VirtualScreen;
             ApplyPendingReferenceSpaceChange(display.xr_frame);
@@ -561,8 +570,10 @@ private:
             }
             // A fresh pose is required to render, not to reproject the last
             // completed image with its original, valid render poses.
-            const bool show = delivery.CanDisplay(policy.display_content_tag, session) &&
-                              display.xr_frame.should_render;
+            const bool show = display.xr_frame.should_render &&
+                (delivery.CanDisplay(policy.display_content_tag, session) ||
+                 (policy.settings_visible &&
+                  delivery.CanDisplayWhileUiPending(policy.display_content_tag, session)));
             if (display.xr_frame.should_render && !show) ++cache_misses;
             if (!backend_->FinishDisplayFrame(display, show)) {
                 SetError(backend_->LastError());

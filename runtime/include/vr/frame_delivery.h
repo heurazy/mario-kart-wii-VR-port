@@ -25,5 +25,12 @@ public:
     bool CanDisplay(uint64_t tag, uint64_t session) const {
         return cached_.token && cached_.tag == tag && cached_.session == session;
     }
+    // Keep the previous, already completed image visible only while a new UI
+    // image is being produced in this same OpenXR session. The completed UI
+    // image replaces it as soon as Complete() runs.
+    bool CanDisplayWhileUiPending(uint64_t ui_tag, uint64_t session) const {
+        return cached_.token && cached_.session == session &&
+               pending_.token && pending_.tag == ui_tag && pending_.session == session;
+    }
 };
 } // namespace mkw::vr::detail
