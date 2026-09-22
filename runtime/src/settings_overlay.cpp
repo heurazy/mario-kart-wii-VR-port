@@ -398,6 +398,7 @@ void DrawWiiRemoteSettings(uint32_t selectedGamePort) {
     if (!ImGui::BeginMenu("Wii Remotes (Bluetooth)")) {
         return;
     }
+    g_wiiContinuousScan = RuntimeConfigFile::WiiContinuousScanEnabled();
     if (ImGui::Checkbox("Use Wii Remotes / Wii U Pro Controllers", &g_wiiRemotesEnabled)) {
         RuntimeConfigFile::SetWiiRemotesEnabled(g_wiiRemotesEnabled);
     }
@@ -841,6 +842,10 @@ void DrawVrSettings() {
         ImGui::TextWrapped("Point with either controller and squeeze its trigger to select. Stick: navigate / adjust. Right A: confirm, B: back. Left %s + %s: close.",ControllerKey(0,1),ControllerKey(0,2));
         if (g_vrSettingsFocus) ImGui::SetKeyboardFocusHere();
         if (ImGui::Button("Return to game")) visible = false;
+        g_wiiContinuousScan = RuntimeConfigFile::WiiContinuousScanEnabled();
+        if (ImGui::Checkbox("Search for Wii Remotes automatically (may cause stutter)", &g_wiiContinuousScan))
+            RuntimeConfigFile::SetWiiContinuousScanEnabled(g_wiiContinuousScan);
+        ImGui::TextWrapped("Off by default. Quest, Index and other VR controllers work without Bluetooth scanning.");
         ImGui::Separator();
         if (ImGui::BeginTabBar("VR categories")) {
             if (ImGui::BeginTabItem("Graphics")) {
@@ -979,10 +984,6 @@ void DrawVrSettings() {
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Driving")) {
-                g_wiiContinuousScan = RuntimeConfigFile::WiiContinuousScanEnabled();
-                if (ImGui::Checkbox("Continuously search for Wii Remotes", &g_wiiContinuousScan))
-                    RuntimeConfigFile::SetWiiContinuousScanEnabled(g_wiiContinuousScan);
-                ImGui::TextWrapped("Off by default to avoid Bluetooth scanning stutters. Quest, Index and other VR controllers do not need this.");
                 bool swapItem=RuntimeConfigFile::Get().vrSwapItemTrick;
                 bool swapDrift=RuntimeConfigFile::Get().vrSwapCockpitDriftBrake;
                 bool mappingChanged=ImGui::Checkbox("Item: X / trick: Y (default: item Y / trick X)", &swapItem);
@@ -1379,6 +1380,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
         if (ev->type != AURORA_SDL_EVENT) {
             continue;
         }
+        physical_wheel::HandleSdlEvent(ev->sdl);
         controller_mapping_wizard::HandleSdlEvent(ev->sdl);
         if (IsToggleKey(ev->sdl, SDL_SCANCODE_F10)) {
             if (g_tutorial.stage!=mkw::vr::TutorialFlow::Stage::Showing) {

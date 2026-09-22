@@ -15,9 +15,14 @@ int main() {
     ok &= RuntimeConfigFile::WiiContinuousScanEnabled();
     RuntimeConfigFile::Mutable().wiiContinuousScan = false;
     ok &= !RuntimeConfigFile::WiiContinuousScanEnabled();
+    std::istringstream legacyScan("[controller]\nwii_continuous_scan = true\n");
+    ok &= !RuntimeConfigFile::ParseConfig(legacyScan,"legacy").wiiContinuousScan.value_or(false);
+    std::istringstream explicitScan("[controller]\nwii_continuous_scan_opt_in = true\n");
+    ok &= RuntimeConfigFile::ParseConfig(explicitScan,"opt-in").wiiContinuousScan.value_or(false);
     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","welcome_complete","true");
     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","tutorial_completed","3");
     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","default_camera","2");
+    ok &= RuntimeConfigFile::WriteSettingAtPath(path,"controller","wii_continuous_scan_opt_in","false");
     const auto content=read();
     std::istringstream stream(content);
     const auto config=RuntimeConfigFile::ParseConfig(stream,"test");

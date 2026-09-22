@@ -7,10 +7,15 @@ Wii controller driver every two seconds while no Wii Remote was connected
 (even faster during initial discovery), potentially interrupting rendering.
 Already connected controllers remain usable.
 
-Enable it in **VR settings > Driving > Continuously search for Wii Remotes**,
-or the desktop Wii Remotes menu. The persisted setting is
-`[controller] wii_continuous_scan = true`. An existing explicit preference is
-respected. Quest, Index and other OpenXR controllers do not require this scan.
+Enable it with the checkbox at the top of **VR settings (F10)** or in the
+desktop Wii Remotes menu. The persisted setting is now
+`[controller] wii_continuous_scan_opt_in = true`. The older
+`wii_continuous_scan` key is ignored on upgrade because installations could
+inherit an enabled value from before scanning became optional. Users who need
+automatic reconnection must opt in again. Quest, Index and other OpenXR
+controllers do not require this scan. USB wheels are enumerated when the wheel
+settings open or an enabled wheel receives an SDL hotplug event, rather than
+once per second during every race.
 
 ## OpenXR loading grace period
 

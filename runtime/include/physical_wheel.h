@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <dolphin/pad.h>
+union SDL_Event;
 
 namespace physical_wheel {
 // Endpoint calibration also handles reversed and combined pedal axes.
@@ -31,6 +32,7 @@ inline PADStatus Map(float steering,float throttle,float brake,bool drift,bool i
 }
 // Device and UI operations run on the guest thread; XR reads a locked snapshot.
 void Poll();
+void HandleSdlEvent(const SDL_Event& event);
 void DrawSettings();
 bool ReadPad(PADStatus& pad,bool blocked,bool race);
 bool SteeringSnapshot(float& steering);

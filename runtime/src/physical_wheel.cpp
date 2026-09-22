@@ -26,8 +26,9 @@ float deadzone=.02f,strength=.05f;
 std::string error;
 int learning=-1;
 std::vector<std::pair<SDL_JoystickID,int>> previousButtons;
-Clock::time_point scanned{},rumbleTick{},motorTime{};
+Clock::time_point rumbleTick{},motorTime{};
 Clock::time_point settingsUntil{};
+bool discoveryRequested=true,discoveryActive=false;
 bool motorOn=false;
 SDL_Haptic* haptic=nullptr;SDL_JoystickID hapticId=0,attemptedHaptic=0;
 bool hapticSubsystem=false;
@@ -139,7 +140,25 @@ void Feedback() {
 }
 void Poll() {
     if(!loaded) Load();
-    if(Clock::now()-scanned>std::chrono::seconds(1)) {Scan();scanned=Clock::now();}
+    // SDL_GetJoysticks/OpenJoystick can probe HID/Bluetooth drivers and stall a
+    // frame. Do not enumerate during ordinary races, especially with the wheel
+    // disabled. SDL hotplug events request the next scan when a wheel is active.
+    const bool discover=enabled || Clock::now()<settingsUntil;
+    if (!discover) {
+        if (discoveryActive) {
+            CloseHaptic();
+            for (auto& d:devices) SDL_CloseJoystick(d.joystick);
+            devices.clear();
+        }
+        discoveryActive=false;discoveryRequested=true;
+        ready=false;armed=false;inputFilter={};
+        std::lock_guard lock(snapshotMutex);
+        snapshotActive=false;snapshotSteering=0;
+        return;
+    }
+    if (!discoveryActive) discoveryRequested=true;
+    discoveryActive=true;
+    if (discoveryRequested) {Scan();discoveryRequested=false;}
     focused=mkw::vr::ReadQuestInputSnapshot().active || SDL_GetKeyboardFocus()!=nullptr;
     ready=AxisReady(axes[0]) && AxisReady(axes[1]) && AxisReady(axes[2]) &&
         std::abs(axes[0].low-axes[0].center)>=1024 && std::abs(axes[0].high-axes[0].center)>=1024 &&
@@ -151,6 +170,10 @@ void Poll() {
         snapshotSteering=snapshotActive?Steering(Raw(axes[0]),axes[0].low,axes[0].center,axes[0].high,deadzone):0;
     }
     Feedback();
+}
+void HandleSdlEvent(const SDL_Event& event) {
+    if (event.type==SDL_EVENT_JOYSTICK_ADDED || event.type==SDL_EVENT_JOYSTICK_REMOVED)
+        discoveryRequested=true;
 }
 bool ReadPad(PADStatus& pad,bool blocked,bool race) {
     blocked=blocked || Clock::now()<settingsUntil;
@@ -190,6 +213,7 @@ bool Motor(int channel,unsigned command) {
 }
 void Shutdown() {
     CloseHaptic();for(auto& d:devices) SDL_CloseJoystick(d.joystick);devices.clear();
+    discoveryActive=false;discoveryRequested=true;
     if(hapticSubsystem) SDL_QuitSubSystem(SDL_INIT_HAPTIC);
     hapticSubsystem=false;ready=false;
     std::lock_guard lock(snapshotMutex);snapshotActive=false;
@@ -197,6 +221,7 @@ void Shutdown() {
 void DrawSettings() {
     settingsUntil=Clock::now()+std::chrono::milliseconds(200);
     Poll();
+    if(ImGui::Button("Refresh USB devices")) discoveryRequested=true;
     ImGui::TextWrapped("USB wheel and pedals (player 1). Calibrate each axis, then bind RIGHT paddle to drift and LEFT paddle to item. Separate USB pedals and combined pedal axes are supported.");
     if(ImGui::Checkbox("Enable physical wheel",&enabled)) {armed=false;StopFeedback();Save();}
     ImGui::TextWrapped("After enabling or reconnecting, close settings and release all pedals and buttons to arm driving.");

@@ -593,7 +593,9 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.attenuateMusicWhenMediaPlays =
         FindConfigValue<bool>(document, "audio", "attenuate_music_when_media_plays");
     config.wiiRemotes = FindConfigValue<bool>(document, "controller", "wii_remotes");
-    config.wiiContinuousScan = FindConfigValue<bool>(document, "controller", "wii_continuous_scan");
+    // The old key was often inherited from a pre-1.1 installation where scanning
+    // was enabled by default. Require a fresh opt-in so upgrades stop rescanning.
+    config.wiiContinuousScan = FindConfigValue<bool>(document, "controller", "wii_continuous_scan_opt_in");
     config.wiiAccelOffsetX = FindConfigValue<double>(document, "controller", "wii_accel_offset_x");
     config.wiiAccelOffsetY = FindConfigValue<double>(document, "controller", "wii_accel_offset_y");
     config.wiiAccelOffsetZ = FindConfigValue<double>(document, "controller", "wii_accel_offset_z");
@@ -1088,7 +1090,7 @@ inline bool WiiContinuousScanEnabled(bool fallback = false) {
 // Persists the continuous scanning switch.
 inline bool SetWiiContinuousScanEnabled(bool value) {
     Mutable().wiiContinuousScan = value;
-    return WriteSetting("controller", "wii_continuous_scan", value ? "true" : "false");
+    return WriteSetting("controller", "wii_continuous_scan_opt_in", value ? "true" : "false");
 }
 
 // Wii Remote accelerometer zero-point correction (g, SDL sensor frame); all zero
