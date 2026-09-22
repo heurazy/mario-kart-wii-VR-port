@@ -56,9 +56,10 @@ constexpr uint32_t kKartBodyPhysicsOffset = 0x90u;
 // visual pose, and is the alternative to try if the seat ever looks detached.
 constexpr uint32_t kKartPhysicsPoseOffset = 0x9Cu;
 
-// Offline Mario Kart Wii puts the local racer first, and immersive
-// presentation already requires exactly one on-screen player.
-constexpr uint32_t kLocalPlayerIndex = 0;
+// RaceCamera::Init (805A2034) reads the signed player byte at +0x9C and
+// passes it to Kart::Manager::GetKartPlayer. Online local racers need not be
+// player zero: follow the exact racer used by the active game's camera.
+constexpr uint32_t kRaceCameraPlayerOffset = 0x9Cu;
 
 // Frames the last good anchor survives a failed read before the camera returns
 // to the game's own. Rides out a transient null during a respawn or transition
@@ -128,13 +129,22 @@ struct KartPoseRead {
     uint32_t physics = 0;
 };
 
-KartPoseRead ReadPlayerKartPose(Mtx34& out) noexcept {
+KartPoseRead ReadPlayerKartPose(uint32_t camera, Mtx34& out) noexcept {
     KartPoseRead read{};
+    if (!camera || !Memory::Contains(camera, kRaceCameraPlayerOffset + 1)) {
+        read.failed_step = "race camera player";
+        return read;
+    }
+    const uint32_t player = Memory::Read8(camera + kRaceCameraPlayerOffset);
+    if (player >= 12) {
+        read.failed_step = "invalid race camera player";
+        return read;
+    }
     if (!ReadGuestPointer(kKartManagerInstanceAddress, read.manager)) {
         read.failed_step = "Kart::Manager instance";
     } else if (!ReadGuestPointer(read.manager + kKartManagerPlayersOffset, read.players)) {
         read.failed_step = "Kart::Manager players array";
-    } else if (!ReadGuestPointer(read.players + kLocalPlayerIndex * 4u, read.proxy)) {
+    } else if (!ReadGuestPointer(read.players + player * 4u, read.proxy)) {
         read.failed_step = "player kart object";
     } else if (!ReadGuestPointer(read.proxy + kKartProxyAccessorOffset, read.accessor)) {
         read.failed_step = "kart accessor";
@@ -553,7 +563,7 @@ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_add
     }
     if (g_state.mode == CameraMode::Game) {
         Mtx34 unused{};
-        const auto kart=ReadPlayerKartPose(unused);
+        const auto kart=ReadPlayerKartPose(race_camera_address, unused);
         std::array<float,3> eye{};
         if(!kart.failed_step) ReadDriverEye(kart,eye);
         g_state.stabilizer = {};
@@ -576,7 +586,7 @@ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_add
     } else if (!ReadRaceCameraViewMatrix(TryGetCpuContext(), race_camera_address,
                                          view_from_world)) {
         failed_step = "race camera view matrix";
-    } else if (kart = ReadPlayerKartPose(kart_from_local); kart.failed_step != nullptr) {
+    } else if (kart = ReadPlayerKartPose(race_camera_address, kart_from_local); kart.failed_step != nullptr) {
         failed_step = kart.failed_step;
     } else if (g_state.mode == CameraMode::Far) {
         g_state.stabilizer = {};

@@ -18,7 +18,7 @@ struct Bridge {
     bool shutdown = false;
     bool raceAtCancel = false;
     bool failure = false;
-    int stopAt = 10000;
+    int stopAt = 20000;
 
     auto run() {
         return mkw::vr::detail::WaitForPublishedSubmission<Status>(
@@ -34,7 +34,7 @@ struct Bridge {
                 if (now >= stopAt) shutdown = true;
                 return Status::Timeout;
             },
-            [&] { return now >= 250; },
+            [&] { return std::chrono::milliseconds(now) >= mkw::vr::detail::kSubmissionGracePeriod; },
             [&] { ++withdrawals; published = false; },
             [&] {
                 ++cancellations;
@@ -48,7 +48,7 @@ int main() {
     try {
         // 15 FPS (67 ms) and even a 200 ms guest frame must survive the
         // 50 ms shutdown polls. Previously the first poll removed the packet.
-        for (int frameMs : {17, 34, 50, 51, 67, 100, 200, 250}) {
+        for (int frameMs : {17, 34, 50, 51, 67, 100, 200, 250, 300, 2000, 9000}) {
             Bridge bridge;
             bridge.completion = frameMs;
             const auto result = bridge.run();
@@ -56,19 +56,19 @@ int main() {
             require(bridge.withdrawals == 0 && bridge.cancellations == 0, "successful frame was canceled");
         }
         Bridge paused;
-        paused.completion = 10000;
+        paused.completion = 15000;
         const auto timeout = paused.run();
-        require(timeout.canceled && !timeout.stalled && paused.now == 250, "idle frame deadline broken");
+        require(timeout.canceled && !timeout.stalled && paused.now == 10000, "idle frame deadline broken");
         require(paused.withdrawals == 1 && paused.cancellations == 1, "cancellation must happen once");
 
         Bridge owned;
-        owned.completion = 10000;
+        owned.completion = 15000;
         owned.owned = true;
         const auto stall = owned.run();
         require(stall.stalled && !stall.canceled, "GPU-owned frame must not be released as canceled");
 
         Bridge raced;
-        raced.completion = 10000;
+        raced.completion = 15000;
         raced.raceAtCancel = true;
         const auto race = raced.run();
         require(race.status == Status::Success && !race.stalled && !race.canceled, "completion race lost");

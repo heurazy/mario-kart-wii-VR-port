@@ -9,6 +9,12 @@ int main() {
     const auto read=[&] { std::ifstream f(path);return std::string(std::istreambuf_iterator<char>(f),{}); };
     mkw::platform::AtomicWriteText(path,"# Keep my settings\n[vr]\nenabled = true\n\n[video]\nwindow_width = 854\n");
     bool ok=RuntimeConfigFile::WriteSettingAtPath(path,"vr","default_camera","1");
+    RuntimeConfigFile::Mutable().wiiContinuousScan.reset();
+    ok &= !RuntimeConfigFile::WiiContinuousScanEnabled();
+    RuntimeConfigFile::Mutable().wiiContinuousScan = true;
+    ok &= RuntimeConfigFile::WiiContinuousScanEnabled();
+    RuntimeConfigFile::Mutable().wiiContinuousScan = false;
+    ok &= !RuntimeConfigFile::WiiContinuousScanEnabled();
     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","welcome_complete","true");
     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","tutorial_completed","3");
     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","default_camera","2");

@@ -1,6 +1,12 @@
 #pragma once
 
+#include <chrono>
+
 namespace mkw::vr::detail {
+
+// Loading a course or compiling shaders can exceed a display frame by seconds.
+// Both compositor modes use the same grace period; shutdown still polls at 50 ms.
+inline constexpr auto kSubmissionGracePeriod = std::chrono::seconds(10);
 
 template <class Status> struct SubmissionWaitResult {
     Status status = Status::Timeout;

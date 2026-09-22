@@ -6,6 +6,7 @@
 #include "vr/openxr_controller_profiles.h"
 #include "vr/vr_controls.h"
 #include "vr/quest_input.h"
+#include "vr/menu_anchor.h"
 
 #include <array>
 #include <cstdint>
@@ -170,7 +171,7 @@ public:
     bool ResetAppSpace(const XrPosef& pose_in_reference_space);
 
     // Called only on the XR owner thread, at the predicted display time.
-    void PollControllers(XrTime time);
+    void PollControllers(XrTime time, const OpenXRFrame* frame = nullptr);
     void RequestDisplayRefreshRate(float hz);
     void PulseGrip(size_t hand, bool grabbed);
     bool ConsumeCameraClick() { const bool click = m_camera_clicked; m_camera_clicked = false; return click; }
@@ -227,7 +228,7 @@ public:
 
 private:
     bool m_panel_anchored = false;
-    XrTime m_panel_tracking_since = 0;
+    MenuAnchorStability m_panel_stability;
     XrPosef m_panel_origin{{0,0,0,1},{0,0,0}};
     enum class FramePhase {
         Idle,

@@ -456,7 +456,7 @@ private:
                 SetError("Asynchronous OpenXR GPU image submission failed");
                 return false;
             }
-            if (Clock::now() - pending_start < std::chrono::milliseconds(250)) return true;
+            if (Clock::now() - pending_start < detail::kSubmissionGracePeriod) return true;
             WithdrawPublishedFrame();
             if (backend_->TryCancelPendingFrame(pending)) {
                 if (!backend_->DiscardCanceledSubmission()) {
@@ -533,7 +533,7 @@ private:
             display.presentation.mode = immersive ? OpenXRD3D12FrameMode::ImmersiveProjection
                                                    : OpenXRD3D12FrameMode::VirtualScreen;
             ApplyPendingReferenceSpaceChange(display.xr_frame);
-            runtime_->PollControllers(display.xr_frame.predicted_display_time);
+            runtime_->PollControllers(display.xr_frame.predicted_display_time, &display.xr_frame);
             display.presentation.anchored=runtime_->PanelAnchored();
             if (runtime_->ConsumeCameraClick() && immersive) MkwVRCycleCamera();
             UpdateDrivingFrame(display, immersive, policy.EffectiveUnitsPerMeter());
@@ -696,7 +696,7 @@ private:
             }
 
             ApplyPendingReferenceSpaceChange(frame.xr_frame);
-            runtime_->PollControllers(frame.xr_frame.predicted_display_time);
+            runtime_->PollControllers(frame.xr_frame.predicted_display_time, &frame.xr_frame);
             frame.presentation.anchored=runtime_->PanelAnchored();
             if (runtime_->ConsumeCameraClick() && immersive) {
                 MkwVRCycleCamera();
@@ -728,7 +728,7 @@ private:
             }
 
             const auto submission_deadline =
-                std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+                std::chrono::steady_clock::now() + detail::kSubmissionGracePeriod;
             const auto waited = detail::WaitForPublishedSubmission<OpenXRD3D12SubmissionStatus>(
                 [this] { return stop_.load(std::memory_order_acquire); },
                 [this, &frame](uint32_t ms) { return backend_->WaitForSubmission(frame, ms); },
@@ -746,7 +746,7 @@ private:
             if (waited.canceled) {
                 ++canceled_packets;
                 if ((canceled_packets & (canceled_packets - 1)) == 0) {
-                    RT_LOG(RT_TAG_RUNTIME) << "[mkw-vr] producer deadline expired after 250 ms: canceled="
+                    RT_LOG(RT_TAG_RUNTIME) << "[mkw-vr] producer deadline expired after 10 s: canceled="
                         << canceled_packets << ", token=" << frame.xr_frame.serial << std::endl;
                 }
                 if (!backend_->FinishFrame(frame, false)) {

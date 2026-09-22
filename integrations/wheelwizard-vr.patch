@@ -1,3 +1,100 @@
+diff --git a/WheelWizard.Test/Features/LicenseRenameTests.cs b/WheelWizard.Test/Features/LicenseRenameTests.cs
+new file mode 100644
+index 00000000..b2380940
+--- /dev/null
++++ b/WheelWizard.Test/Features/LicenseRenameTests.cs
+@@ -0,0 +1,91 @@
++using System.Reflection;
++using System.Text;
++using Testably.Abstractions.Testing;
++using WheelWizard.Models.Enums;
++using WheelWizard.Services;
++using WheelWizard.Settings;
++using WheelWizard.Settings.Types;
++using WheelWizard.Utilities.Generators;
++using WheelWizard.WheelWizardData;
++using WheelWizard.WiiManagement.GameLicense;
++using WheelWizard.WiiManagement.GameLicense.Domain;
++using WheelWizard.WiiManagement.MiiManagement;
++using WheelWizard.WiiManagement.MiiManagement.Domain.Mii;
++
++namespace WheelWizard.Test.Features;
++
++[Collection("SettingsFeature")]
++public sealed class LicenseRenameTests
++{
++    [Theory]
++    [InlineData(false)]
++    [InlineData(true)]
++    public void RenamePreservesLicenseIdentityWithOrWithoutNandMii(bool hasMii)
++    {
++        var settings = Substitute.For<ISettingsManager>();
++        settings.LOAD_PATH.Returns(Substitute.For<Setting>(typeof(string), "load", ""));
++        settings.Get<string>(Arg.Any<Setting>()).Returns("");
++        settings.Get<MarioKartWiiEnums.Regions>(Arg.Any<Setting>()).Returns(MarioKartWiiEnums.Regions.Europe);
++        settings.PathsSetupCorrectly().Returns(true);
++        var runtime = typeof(SettingsRuntime).GetField("_current", BindingFlags.Static | BindingFlags.NonPublic)!;
++        var previous = runtime.GetValue(null);
++        SettingsRuntime.Initialize(settings);
++        try
++        {
++            var fs = new MockFileSystem();
++            var miis = Substitute.For<IMiiDbService>();
++            var mii = new Mii { MiiId = 0x81234567, Name = new MiiName("Old") };
++            if (hasMii)
++                miis.GetByAvatarId(mii.MiiId).Returns(Ok(mii));
++            else
++                miis.GetByAvatarId(mii.MiiId).Returns(Fail("Mii block not found"));
++            miis.UpdateName(mii.MiiId, "New name").Returns(Ok());
++            var service = new GameLicenseSingletonService(
++                miis,
++                fs,
++                Substitute.For<IWhWzDataSingletonService>(),
++                Substitute.For<IRRratingReader>(),
++                settings
++            );
++            var data = new byte[0x2BC000];
++            Encoding.ASCII.GetBytes("RKSD0006RKPD").CopyTo(data, 0);
++            new byte[] { 0x81, 0x23, 0x45, 0x67 }.CopyTo(data, 8 + 0x28);
++            data[8 + 0x5C] = 12; // Online identity must survive.
++            data[8 + 0xB0] = 21; // Rating must survive.
++            var before = (byte[])data.Clone();
++            typeof(GameLicenseSingletonService)
++                .GetField("_rksysData", BindingFlags.Instance | BindingFlags.NonPublic)!
++                .SetValue(service, data);
++            service.LicenseCollection.Users.Add(
++                new LicenseProfile
++                {
++                    Mii = hasMii ? mii : null,
++                    FriendCode = "1234-5678-9012",
++                    Vr = 5000,
++                    Br = 5000,
++                    RegionId = 0,
++                    TotalRaceCount = 10,
++                    TotalWinCount = 2,
++                }
++            );
++            var result = service.ChangeMiiName(0, "New name");
++            Assert.True(result.IsSuccess, result.IsFailure ? result.Error.Message : "");
++            var saved = fs.File.ReadAllBytes(Path.Combine(PathManager.SaveFolderPath, "RMCP", "rksys.dat"));
++            Assert.Equal("New name", Encoding.BigEndianUnicode.GetString(saved, 8 + 0x14, 20).TrimEnd('\0'));
++            Assert.Equal("New name", service.LicenseCollection.Users[0].NameOfMii);
++            for (int i = 0; i < data.Length; i++)
++                if (!(i >= 28 && i < 48) && !(i >= 0x27FFC && i < 0x28000))
++                    Assert.Equal(before[i], saved[i]);
++            var checkedCrc = (byte[])saved.Clone();
++            GameLicenseSingletonService.FixRksysCrc(checkedCrc);
++            Assert.Equal(checkedCrc, saved);
++            miis.Received(hasMii ? 1 : 0).UpdateName(mii.MiiId, "New name");
++            Assert.True(service.ChangeMiiName(1, "Other").IsFailure);
++            Assert.True(service.ChangeMiiName(0, " ").IsFailure);
++        }
++        finally
++        {
++            runtime.SetValue(null, previous);
++        }
++    }
++}
 diff --git a/WheelWizard.Test/Features/Recomp/LocalVrLaunchDiagnosticsTests.cs b/WheelWizard.Test/Features/Recomp/LocalVrLaunchDiagnosticsTests.cs
 new file mode 100644
 index 00000000..5bede2bc
@@ -359,10 +456,111 @@ index ce6b1b1d..7d0a8d5c 100644
  
              return Ok(new SettingsValidationReport(issues));
 diff --git a/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs b/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs
-index 9bcbfb25..f4e2d5a8 100644
+index 9bcbfb25..d3e73817 100644
 --- a/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs
 +++ b/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs
-@@ -756,6 +756,8 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+@@ -319,7 +319,9 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+ 
+         var rawMiiResult = _miiService.GetByAvatarId(avatarId);
+         if (rawMiiResult.IsFailure)
+-            return new FormatException("Failed to parse mii data: " + rawMiiResult.Error.Message);
++            // A native/guest Mii need not have a corresponding NAND database
++            // entry. The license's own UTF-16 name remains authoritative.
++            return new Mii { Name = new MiiName(licenseName), MiiId = avatarId };
+ 
+         return rawMiiResult.Value;
+     }
+@@ -683,19 +685,21 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+ 
+     public OperationResult ChangeMiiName(int userIndex, string? newName)
+     {
++        if (WheelWizard.Services.Launcher.LocalVrLauncher.IsBusy)
++            return Fail("Close the VR game before editing licenses or friends.");
+         if (string.IsNullOrWhiteSpace(newName))
+             return Fail("Cannot set name to an empty name.");
+         if (userIndex is < 0 or >= MaxPlayerNum)
+             return Fail("Invalid license index. Please select a valid license.");
+ 
++        if (
++            _rksysData == null
++            || _rksysData.Length < RksysSize
++            || Encoding.ASCII.GetString(_rksysData, 8 + userIndex * RkpdSize, 4) != RkpdMagic
++            || userIndex >= Licenses.Users.Count
++        )
++            return Fail("Please select an existing license.");
+         var user = Licenses.Users[userIndex];
+-        var miiIsEmptyOrNoName = IsNoNameOrEmptyMii(user);
+-
+-        if (miiIsEmptyOrNoName)
+-            return Fail("This license has no Mii data or is incomplete.\n" + "Please use the Mii Channel to create a Mii first.");
+-
+-        if (user.Mii == null)
+-            return Fail("This license has no Mii data or is incomplete.\n" + "Please use the Mii Channel to create a Mii first.");
+ 
+         newName = Regex.Replace(newName, @"\s+", " ");
+ 
+@@ -703,44 +707,36 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+         if (newName.Length is > 10 or < 3)
+             return Fail("Names must be between 3 and 10 characters long.");
+ 
+-        if (newName.Length > 10)
+-            newName = newName.Substring(0, 10);
+         var nameResult = MiiName.Create(newName);
+         if (nameResult.IsFailure)
+             return nameResult.Error;
+ 
+-        user.Mii.Name = nameResult.Value;
++        // Update a real NAND Mii when available; missing guest/default Miis must
++        // not prevent changing the license name or invent a new Mii identity.
++        var avatarId = BigEndianBinaryHelper.BufferToUint32(_rksysData, 8 + userIndex * RkpdSize + 0x28);
++        var existingMii = _miiService.GetByAvatarId(avatarId);
++        if (existingMii.IsSuccess)
++        {
++            var updated = _miiService.UpdateName(avatarId, newName);
++            if (updated.IsFailure)
++                return updated.Error;
++        }
++        var originalData = (byte[])_rksysData.Clone();
+         var nameWrite = WriteLicenseNameToSaveData(userIndex, newName);
+         if (nameWrite.IsFailure)
+             return nameWrite.Error;
+-        var updated = _miiService.UpdateName(user.Mii.MiiId, newName);
+-        if (updated.IsFailure)
+-            return updated.Error;
+         var rksysSaveResult = SaveRksysToFile();
+         if (rksysSaveResult.IsFailure)
++        {
++            _rksysData = originalData;
+             return rksysSaveResult.Error;
++        }
++        user.Mii ??= new Mii { MiiId = avatarId };
++        user.Mii.Name = nameResult.Value;
+ 
+         return Ok();
+     }
+ 
+-    private bool IsNoNameOrEmptyMii(LicenseProfile user)
+-    {
+-        if (user?.Mii == null)
+-            return true;
+-
+-        var name = user.Mii.Name;
+-        if (name.ToString() == "no name")
+-            return true;
+-        var raw = MiiSerializer.Serialize(user.Mii).Value;
+-        if (raw.Length != 74)
+-            return true; // Not valid
+-        if (raw.All(b => b == 0))
+-            return true;
+-
+-        // Otherwise, it’s presumably valid
+-        return false;
+-    }
+-
+     private OperationResult WriteLicenseNameToSaveData(int userIndex, string newName)
+     {
+         if (_rksysData == null || _rksysData.Length < RksysSize)
+@@ -756,6 +752,8 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
  
      private OperationResult SaveRksysToFile()
      {

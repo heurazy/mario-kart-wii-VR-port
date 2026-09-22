@@ -352,7 +352,7 @@ void ApplyConfiguredMappings() {
 }
 
 bool g_wiiRemotesEnabled = RuntimeConfigFile::WiiRemotesEnabled(true);
-bool g_wiiContinuousScan = RuntimeConfigFile::WiiContinuousScanEnabled(true);
+bool g_wiiContinuousScan = RuntimeConfigFile::WiiContinuousScanEnabled();
 
 // Accelerometer readout and zero-point calibration for a bare remote / remote + Nunchuk.
 void DrawWiiRemoteAccelerometer(uint32_t port) {
@@ -979,6 +979,10 @@ void DrawVrSettings() {
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Driving")) {
+                g_wiiContinuousScan = RuntimeConfigFile::WiiContinuousScanEnabled();
+                if (ImGui::Checkbox("Continuously search for Wii Remotes", &g_wiiContinuousScan))
+                    RuntimeConfigFile::SetWiiContinuousScanEnabled(g_wiiContinuousScan);
+                ImGui::TextWrapped("Off by default to avoid Bluetooth scanning stutters. Quest, Index and other VR controllers do not need this.");
                 bool swapItem=RuntimeConfigFile::Get().vrSwapItemTrick;
                 bool swapDrift=RuntimeConfigFile::Get().vrSwapCockpitDriftBrake;
                 bool mappingChanged=ImGui::Checkbox("Item: X / trick: Y (default: item Y / trick X)", &swapItem);

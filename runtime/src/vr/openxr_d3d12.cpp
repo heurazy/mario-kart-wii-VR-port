@@ -426,7 +426,6 @@ public:
                                                static_cast<int32_t>(eye_swapchains_[0].height)}};
             quad.pose.orientation.w = 1.0f;
             quad.pose.position.z = -std::max(0.25f, image.presentation.quad_distance_meters);
-            AnchorPanel(quad);
             quad.size.width = std::max(0.25f, image.presentation.quad_width_meters);
             quad.size.height = quad.size.width * float(eye_swapchains_[0].height) / float(eye_swapchains_[0].width);
             const XrCompositionLayerBaseHeader* layers[]{reinterpret_cast<const XrCompositionLayerBaseHeader*>(&quad)};
@@ -504,7 +503,6 @@ public:
             quad.subImage.imageArrayIndex = 0;
             quad.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
             quad.pose.position = {0.0f, 0.0f, -std::max(0.25f, frame.presentation.quad_distance_meters)};
-            AnchorPanel(quad);
             quad.size.width = std::max(0.25f, frame.presentation.quad_width_meters);
             quad.size.height = quad.size.width * static_cast<float>(eye_swapchains_[0].height) /
                                static_cast<float>(eye_swapchains_[0].width);
@@ -605,15 +603,6 @@ public:
     const std::string& LastError() const { return last_error_; }
 
 private:
-    void AnchorPanel(XrCompositionLayerQuad& quad) const {
-        if(!runtime_->PanelAnchored()) return;
-        const auto anchor=runtime_->PanelOrigin();
-        const auto& q=anchor.orientation;
-        const auto offset=RotateUiVector(q.x,q.y,q.z,q.w,{0,0,quad.pose.position.z});
-        quad.space=runtime_->AppSpace();
-        quad.pose=anchor;
-        quad.pose.position.x+=offset[0];quad.pose.position.y+=offset[1];quad.pose.position.z+=offset[2];
-    }
     bool SelectSwapchainFormat() {
         const auto& formats = runtime_->SwapchainFormats();
         // Aurora's UNORM target contains the gamma-encoded bytes expected by

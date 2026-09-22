@@ -604,12 +604,14 @@ void OpenXRRuntime::PulseGrip(size_t hand, bool grabbed) {
     xrApplyHapticFeedback(m_session, &info, reinterpret_cast<const XrHapticBaseHeader*>(&pulse));
 }
 
-void OpenXRRuntime::PollControllers(XrTime time) {
+void OpenXRRuntime::PollControllers(XrTime time, const OpenXRFrame* frame) {
     m_left_grip_valid = m_camera_clicked = false;
     m_right_grip_valid = false;
     m_squeeze_values = {};
     m_raw_input = {};
     if (m_controller_actions == XR_NULL_HANDLE || !IsSessionFocused()) {
+        m_panel_anchored=false;
+        m_panel_stability.Reset();
         m_steam_trick_pause.Update(false,false,false,time);
         m_camera_latch.Update(false, false);
         PublishQuestInput({});
@@ -700,29 +702,36 @@ void OpenXRRuntime::PollControllers(XrTime time) {
     const bool showPanel=panelPolicy.settings_visible ||
         (panelPolicy.presentation==VRPresentationMode::VirtualScreen &&
          panelPolicy.scene.mode!=VRSceneMode::Race);
-    if (!showPanel) { m_panel_anchored=false;m_panel_tracking_since=0; }
-    else if (!m_panel_anchored) {
-        XrSpaceLocation head{XR_TYPE_SPACE_LOCATION};
-        const auto flags=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT|
-            XR_SPACE_LOCATION_POSITION_TRACKED_BIT|XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
-        if(XR_SUCCEEDED(xrLocateSpace(ViewSpace(),AppSpace(),time,&head)) && (head.locationFlags&flags)==flags) {
-            // Keep the menu upright and stationary where it was opened.
-            const auto& q=head.pose.orientation;
+    if (!showPanel) { m_panel_anchored=false;m_panel_stability.Reset(); }
+    else {
+        const auto flags=XR_VIEW_STATE_POSITION_VALID_BIT|XR_VIEW_STATE_ORIENTATION_VALID_BIT|
+            XR_VIEW_STATE_POSITION_TRACKED_BIT|XR_VIEW_STATE_ORIENTATION_TRACKED_BIT;
+        if(frame && frame->predicted_display_time==time && frame->views_valid &&
+           (frame->view_state_flags&flags)==flags) {
+            // Use the exact eye poses that render this frame: a separate VIEW
+            // space query can still be settling when the first stereo views arrive.
+            XrPosef head=frame->views[0].pose;
+            const auto& other=frame->views[1].pose.position;
+            head.position={(head.position.x+other.x)*.5f,(head.position.y+other.y)*.5f,
+                           (head.position.z+other.z)*.5f};
+            auto& q=head.orientation;
+            const float norm=q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w;
+            if(norm>.5f && norm<1.5f) {
+                const float inv=1/std::sqrt(norm);
+                q.x*=inv; q.y*=inv; q.z*=inv; q.w*=inv;
+            }
             const auto forward=RotateUiVector(q.x,q.y,q.z,q.w,{0,0,-1});
             const auto up=RotateUiVector(q.x,q.y,q.z,q.w,{0,1,0});
             const float yaw=std::atan2(-forward[0],-forward[2]);
-            const bool ready=IsSessionFocused() && up[1]>.5f &&
-                forward[0]*forward[0]+forward[2]*forward[2]>.25f;
-            if(!ready) m_panel_tracking_since=0;
-            else {
-                if(!m_panel_tracking_since) m_panel_tracking_since=time;
-                if(time-m_panel_tracking_since>=400000000) {
-                    m_panel_origin=head.pose;
-                    m_panel_origin.orientation={0,std::sin(yaw*.5f),0,std::cos(yaw*.5f)};
-                    m_panel_anchored=true;
-                }
+            UiHandPose pose;
+            pose.position={head.position.x,head.position.y,head.position.z};
+            pose.forward=forward; pose.up=up; pose.valid=norm>.5f && norm<1.5f;
+            if(!m_panel_anchored && m_panel_stability.Update(pose,time)) {
+                m_panel_origin=head;
+                m_panel_origin.orientation={0,std::sin(yaw*.5f),0,std::cos(yaw*.5f)};
+                m_panel_anchored=true;
             }
-        } else m_panel_tracking_since=0;
+        } else { m_panel_anchored=false; m_panel_stability.Reset(); }
     }
     const auto uiPose=[&](XrSpace space) {
         UiHandPose out;
@@ -956,6 +965,10 @@ OpenXREventStatus OpenXRRuntime::PollEvents() {
 bool OpenXRRuntime::HandleSessionStateChanged(
     const XrEventDataSessionStateChanged& event) {
     m_session_state = event.state;
+    if(event.state!=XR_SESSION_STATE_FOCUSED) {
+        m_panel_anchored=false;
+        m_panel_stability.Reset();
+    }
     std::ostringstream message;
     message << "OpenXR session state -> " << SessionStateName(event.state);
     Log(OpenXRLogLevel::Info, message.str());
@@ -1163,6 +1176,7 @@ bool OpenXRRuntime::EndFrameWithoutLayers(const OpenXRFrame& frame) {
 
 bool OpenXRRuntime::ResetAppSpace(const XrPosef& pose_in_reference_space) {
     m_panel_anchored=false;
+    m_panel_stability.Reset();
     ClearError();
     if (!HasSession()) {
         return Fail(XR_ERROR_CALL_ORDER_INVALID, "ResetAppSpace",
@@ -1205,7 +1219,7 @@ bool OpenXRRuntime::ConsumeAppSpaceChangesThrough(XrTime display_time) {
                       consumed = consumed || due;
                       return due;
                   });
-    if(consumed) { m_panel_anchored=false;m_panel_tracking_since=0; }
+    if(consumed) { m_panel_anchored=false;m_panel_stability.Reset(); }
     return consumed;
 }
 
@@ -1294,6 +1308,8 @@ void OpenXRRuntime::DestroyReferenceSpaces() {
 }
 
 void OpenXRRuntime::ResetSessionState() {
+    m_panel_anchored=false;
+    m_panel_stability.Reset();
     m_session_state = XR_SESSION_STATE_UNKNOWN;
     m_app_space_type = m_config.reference_space;
     m_session_running = false;

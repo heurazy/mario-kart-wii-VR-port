@@ -2,6 +2,24 @@
 
 namespace NetworkHle {
 
+// Bounded connection diagnostics: metadata only, never credentials, profile
+// names, friend codes or packet payloads. Useful when QR2 times out (84020)
+// without a host socket error. Do not log routine empty/nonblocking polls.
+static void TraceDatagram(WiiSocket& socket, uint32_t fd, bool received,
+                          const sockaddr_in* peer, const uint8_t* data, int size) {
+    if (socket.type != SOCK_DGRAM || size < 0) return;
+    auto& count = received ? socket.diagnosticReceives : socket.diagnosticSends;
+    ++count;
+    if (count > 24) return;
+    const unsigned port = peer ? ntohs(peer->sin_port) : socket.peerPort;
+    int qr2 = -1;
+    if (port == 27900 && size >= 5 && !received) qr2 = data[0];
+    if (port == 27900 && size >= 7 && received && data[0] == 0xfe && data[1] == 0xfd)
+        qr2 = data[2];
+    RT_LOGF(RT_TAG_NET, "UDP %s fd=%u packet=%u bytes=%d remote-port=%u qr2=%d\n",
+            received ? "recv" : "send", fd, count, size, port, qr2);
+}
+
 static int32_t NewWiiSocket(uint32_t af, uint32_t type, uint32_t protocol) {
     if (!EnsureSocketRuntime()) {
         return -SO_EINVAL;
@@ -27,6 +45,9 @@ static int32_t DeleteWiiSocket(uint32_t fd) {
         return -SO_EBADF;
     }
     ClearSslSessionsForSocket(fd);
+    if (s->type == SOCK_DGRAM)
+        RT_LOGF(RT_TAG_NET, "UDP closed fd=%u sent=%u received=%u\n",
+                fd, s->diagnosticSends, s->diagnosticReceives);
     CloseNativeSocket(s->native);
     *s = {};
     s->native = kInvalidSocket;
@@ -468,6 +489,7 @@ int32_t HandleIpTopIoctlv(uint32_t cmd, const std::vector<IoVector>& in, const s
                                static_cast<int>(flags), destPtr, destLen);
         const int hostError = ret < 0 ? NativeLastError() : 0;
         int32_t result = SocketResult(ret);
+        TraceDatagram(*s, fd, false, destPtr ? &dest : nullptr, sendData, ret);
         if (patchedWrite && ret == static_cast<int>(sendSize)) {
             result = static_cast<int32_t>(in[0].size);
         }
@@ -516,6 +538,9 @@ int32_t HandleIpTopIoctlv(uint32_t cmd, const std::vector<IoVector>& in, const s
             WriteWiiSockAddr(out[1].address, from, static_cast<uint32_t>(fromLen));
         }
         const int32_t result = ret >= 0 ? SocketResult(ret) : SocketErrorResult(nativeErr);
+        if (!(flags & 0x02)) // Peeking must not count the same packet repeatedly.
+            TraceDatagram(*s, fd, true, fromPtr ? &from : nullptr,
+                          reinterpret_cast<const uint8_t*>(data), ret);
         if (ret < 0 && result != -SO_EAGAIN && result != s->lastLoggedRecvError) {
             s->lastLoggedRecvError = result;
             NetFail("recv failed fd=%u host=%d wii=%d", fd, nativeErr, result);

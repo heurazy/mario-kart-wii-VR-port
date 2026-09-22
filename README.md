@@ -34,7 +34,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
 - Retro Rewind VR support through WheelWizard, with pack updates, patch preparation,
   compiled-product repair, and access to the VR installation's saves, friends and Miis.
   See [WheelWizard feature coverage](docs/WHEELWIZARD-VR.md) for the local integration
-  and its limits; these changes are not yet included in the published v1.0 release.
+  and its limits.
 
 ## Requirements
 
@@ -52,7 +52,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
 
 ### Guided installer
 
-1. Download `WiiCompiled-Setup.exe` from the [v1.0 release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/tag/v1.0).
+1. Download `WiiCompiled-Setup.exe` from the [v1.1 release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/tag/v1.1).
 2. Start SteamVR, then run the installer.
 3. Select your clean PAL `RMCP01` image and choose an installation folder.
 4. Leave **Download and install Retro Rewind automatically** enabled if you want both games.
@@ -65,7 +65,7 @@ finishes. Select **Mario Kart Wii VR** or **Retro Rewind VR** from that launcher
 
 ### Portable bundle
 
-Download `WiiCompiled-VR-Portable-v1.0.zip`, extract the complete folder, and run
+Download `WiiCompiled-VR-Portable-v1.1.zip`, extract the complete folder, and run
 `WiiCompiled-VR-Setup.exe`. Keep **portable installation** enabled and keep the folder together.
 The launcher is at `WheelWizard/WheelWizard.exe`; the `UserData` folder keeps configuration, NAND,
 cache, and logs beside the portable installation. `Update-VR.cmd` updates the VR runtime while
@@ -74,7 +74,7 @@ preserving personal and compiled game data.
 No release contains a ROM or a translated game executable. Compilation is intentionally performed
 locally from the disc image you select.
 
-## USB steering wheels and pedals (source build)
+## USB steering wheels and pedals
 
 Open **VR settings > Hardware wheel** (also available in desktop controller settings).
 Select the steering device and axis; record full left, full right and center. Select each
@@ -97,7 +97,7 @@ capped at 15%; no constant torque, spring or centering effect is requested. Rumb
 on the driver; lack of rumble does not prevent driving. This is not simulated tire-force feedback.
 An incomplete/disconnected setup gives neutral race input. Close options and release held buttons
 and pedals before driving. Hardware/driver compatibility needs testing; no universal device support
-is claimed. These additions require rebuilding and are not in the existing v1.0 download.
+is claimed.
 
 ## Quest and OpenXR controls
 
@@ -197,7 +197,7 @@ release target is Windows/D3D12 with OpenXR enabled. The main build scripts are:
 dotnet build translator/Translator.sln -c Release
 powershell -ExecutionPolicy Bypass -File Launcher/Build-Installer.ps1
 powershell -ExecutionPolicy Bypass -File Launcher/Build-Portable.ps1 `
-  -SetupExecutable Launcher/dist/WiiCompiled-Setup.exe -Version 1.0
+  -SetupExecutable Launcher/dist/WiiCompiled-Setup.exe -Version 1.1
 ```
 
 The build boundary deliberately excludes translated game code and game data from Git and releases.

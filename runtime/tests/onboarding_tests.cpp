@@ -1,4 +1,5 @@
 #include "vr/onboarding.h"
+#include "vr/menu_anchor.h"
 #include <iostream>
 #include <limits>
 using namespace mkw::vr;
@@ -26,6 +27,26 @@ int main() {
         flow.Update(false,!first,false,completed,7);
         check(flow.stage==TutorialFlow::Stage::Idle,"race exit resets pending tutorial");
     }
+    MenuAnchorStability anchor;
+    UiHandPose head; head.valid=true; head.position={0,1.65f,0};
+    check(!anchor.Update(head,1000000000),"first tracked pose cannot anchor immediately");
+    head.position[1]=.2f;
+    check(!anchor.Update(head,1400000000),"startup height jump restarts settling");
+    check(!anchor.Update(head,1700000000),"new origin needs its own stable interval");
+    check(anchor.Update(head,1800000000),"stable tracked pose anchors");
+    anchor.Reset();
+    check(!anchor.Update(head,2000000000),"focus/recenter reset discards old stability");
+    head.up={0,-1,0};
+    check(!anchor.Update(head,2400000000),"upside down headset cannot establish menu origin");
+    head.up={0,1,0}; head.valid=false;
+    check(!anchor.Update(head,2500000000),"untracked pose rejected");
+    head.valid=true;
+    check(!anchor.Update(head,2600000000),"tracking recovery restarts settling");
+    head.forward={1,0,0};
+    check(!anchor.Update(head,3000000000),"turn during startup restarts settling");
+    check(anchor.Update(head,3400000000),"stable new heading anchors");
+    head.position[0]=std::numeric_limits<float>::quiet_NaN();
+    check(!anchor.Update(head,3500000000),"invalid coordinates rejected");
     TutorialFlow flow;
     check(!flow.Update(true,false,true,0,0),"existing player pause is not claimed by tutorial");
     int requests=0;
