@@ -11,9 +11,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
 [Download the latest release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/latest)
 ## Roadmap
 - automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
-- periodic controller-search freezes: legacy Wii Remote scanning is disabled on upgrade in v1.1.1; USB wheel discovery now follows hotplug events
 - sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
-- multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing depends on Retro WFC availability
 - fix low FPS in menu : planned
 - new hand models : planned
 - fix character height : planned
@@ -24,6 +22,13 @@ clean PAL `RMCP01` disc image and compile the game locally.
 - option to move with the kart : planned
 - more control options : planned
 - throwing shells and other items option : planned
+<details>
+  <summary><h2>DONE</h2></summary>
+
+  - multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing depends on Retro WFC availability
+  - periodic controller-search freezes: legacy Wii Remote scanning is disabled on upgrade in v1.1.1; USB wheel discovery now follows hotplug events
+
+</details>
 
 ## What the port adds
 
