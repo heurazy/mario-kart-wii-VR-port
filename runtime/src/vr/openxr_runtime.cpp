@@ -708,14 +708,31 @@ void OpenXRRuntime::PollControllers(XrTime time, const OpenXRFrame* frame) {
         // bits, especially during startup or after a temporary focus loss.
         // The valid bits and a coherent upright pose are sufficient here.
         const auto flags=XR_VIEW_STATE_POSITION_VALID_BIT|XR_VIEW_STATE_ORIENTATION_VALID_BIT;
+        XrPosef head{};
+        bool head_valid=false;
         if(frame && frame->predicted_display_time==time && frame->views_valid &&
            (frame->view_state_flags&flags)==flags) {
             // Use the exact eye poses that render this frame: a separate VIEW
             // space query can still be settling when the first stereo views arrive.
-            XrPosef head=frame->views[0].pose;
+            head=frame->views[0].pose;
             const auto& other=frame->views[1].pose.position;
             head.position={(head.position.x+other.x)*.5f,(head.position.y+other.y)*.5f,
                            (head.position.z+other.z)*.5f};
+            head_valid=true;
+        } else if(time>0) {
+            // Some runtimes omit the view position-valid bit while VIEW space
+            // itself is already located. This also covers a frame that was
+            // explicitly hidden while an options panel is opening.
+            XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+            const auto location_flags=XR_SPACE_LOCATION_POSITION_VALID_BIT|
+                XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+            if(XR_SUCCEEDED(xrLocateSpace(ViewSpace(),AppSpace(),time,&location)) &&
+               (location.locationFlags&location_flags)==location_flags) {
+                head=location.pose;
+                head_valid=true;
+            }
+        }
+        if(head_valid) {
             auto& q=head.orientation;
             const float norm=q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w;
             if(norm>.5f && norm<1.5f) {
@@ -734,7 +751,7 @@ void OpenXRRuntime::PollControllers(XrTime time, const OpenXRFrame* frame) {
                 m_panel_anchored=true;
                 Log(OpenXRLogLevel::Info,"VR menu anchored from stable stereo view poses");
             }
-        } else { m_panel_anchored=false; m_panel_stability.Reset(); }
+        } else m_panel_stability.Reset();
     }
     const auto uiPose=[&](XrSpace space) {
         UiHandPose out;
