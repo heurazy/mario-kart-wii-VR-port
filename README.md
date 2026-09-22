@@ -11,7 +11,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
 [Download the latest release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/latest)
 ## Roadmap
 - automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
-- periodic Wii Remote scan freezes: scanning disabled by default in v1.1, with an opt-in VR setting
+- periodic controller-search freezes: legacy Wii Remote scanning is disabled on upgrade in v1.1.1; USB wheel discovery now follows hotplug events
 - sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
 - multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing depends on Retro WFC availability
 - fix low FPS in menu : planned
@@ -67,7 +67,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
 
 ### Guided installer
 
-1. Download `WiiCompiled-Setup.exe` from the [v1.1 release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/tag/v1.1).
+1. Download `WiiCompiled-Setup.exe` from the [v1.1.1 release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/tag/v1.1.1).
 2. Start SteamVR, then run the installer.
 3. Select your clean PAL `RMCP01` image and choose an installation folder.
 4. Leave **Download and install Retro Rewind automatically** enabled if you want both games.
@@ -80,7 +80,7 @@ finishes. Select **Mario Kart Wii VR** or **Retro Rewind VR** from that launcher
 
 ### Portable bundle
 
-Download `WiiCompiled-VR-Portable-v1.1.zip`, extract the complete folder, and run
+Download `WiiCompiled-VR-Portable-v1.1.1.zip`, extract the complete folder, and run
 `WiiCompiled-VR-Setup.exe`. Keep **portable installation** enabled and keep the folder together.
 The launcher is at `WheelWizard/WheelWizard.exe`; the `UserData` folder keeps configuration, NAND,
 cache, and logs beside the portable installation. `Update-VR.cmd` updates the VR runtime while
