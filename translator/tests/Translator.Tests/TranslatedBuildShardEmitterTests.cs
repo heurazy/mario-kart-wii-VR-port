@@ -93,7 +93,8 @@ public sealed class TranslatedBuildShardEmitterTests
             Write(resolvedPath, """
                 {"Entries":[
                   {"Address":2147487744,"Symbol":"func_80001000","Name":"func_80001000","Kind":"base","Priority":0,"DirectCallAvailable":true,"PreservesNonvolatileFprs":true,"NonvolatileFprWriteMask":0,"MustRemainDynamicallyDispatchable":false},
-                  {"Address":2147491840,"Symbol":"rr_80002000","Name":"rr_80002000","Kind":"rr","Priority":100,"DirectCallAvailable":true,"PreservesNonvolatileFprs":false,"NonvolatileFprWriteMask":16384,"MustRemainDynamicallyDispatchable":true}
+                  {"Address":2147491840,"Symbol":"rr_80002000","Name":"rr_80002000","Kind":"rr","Priority":100,"DirectCallAvailable":true,"PreservesNonvolatileFprs":false,"NonvolatileFprWriteMask":16384,"MustRemainDynamicallyDispatchable":true},
+                  {"Address":2147500032,"Symbol":"func_80004000","Name":"func_80004000","Kind":"base","Priority":0,"DirectCallAvailable":true,"PreservesNonvolatileFprs":true,"NonvolatileFprWriteMask":0,"MustRemainDynamicallyDispatchable":false}
                 ]}
                 """);
 
@@ -129,6 +130,7 @@ public sealed class TranslatedBuildShardEmitterTests
             var retroDispatchText = File.ReadAllText(retroDispatch);
             Assert.Contains("{0x80002000u, &rr_80002000, 0x00004000u, false}", retroDispatchText);
             Assert.DoesNotContain("{0x80002000u, &func_80002000", retroDispatchText);
+            Assert.DoesNotContain("0x80004000u", retroDispatchText);
 
             // A function claimed by a native registration is excluded from the
             // translated graph entirely rather than emitted and then overridden.

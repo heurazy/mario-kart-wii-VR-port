@@ -158,6 +158,9 @@ void MkwVRPolicySetFirstPersonEngaged(bool engaged) noexcept;
 // republishing (and revalidating) the whole configuration.
 void MkwVRPolicySetFirstPersonUnitsPerMeter(float units_per_meter) noexcept;
 MkwVRPolicySnapshot MkwVRPolicyGetSnapshot() noexcept;
+// Cheap guest-thread gate for the many NW4R object visibility checks per frame.
+// Mirrors immersive-race eligibility without taking the policy mutex per object.
+bool MkwVRPolicyExpandRaceCulling() noexcept;
 
 // This classifier is deliberately structural rather than heuristic: future
 // hooks report whether the active projection is perspective/orthographic and
@@ -175,10 +178,9 @@ enum class MkwVRHookCapability : uint8_t {
     Culling,
 };
 
-// Validated PAL RMCP01 symbols from projects/mkwii/MAP.txt. These are future
-// instrumentation candidates, not registered native replacements: the current
-// PPC_NATIVE_OVERRIDE mechanism replaces a translated function outright and
-// cannot safely observe it before/after its original body.
+// Validated PAL RMCP01 symbols from projects/mkwii/MAP.txt. Most entries are
+// observation candidates. The two culling hooks wrap or extend the game's
+// visibility results during immersive races.
 struct MkwVRHookPoint {
     uint32_t address;
     const char* symbol;

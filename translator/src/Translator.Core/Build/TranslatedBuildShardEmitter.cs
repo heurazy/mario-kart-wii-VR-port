@@ -185,6 +185,15 @@ public static partial class TranslatedBuildShardEmitter
         var rrTraits = new Dictionary<uint, Trait>(BuildRetroTraits(activeBase, baseTraits, retroEntries));
         foreach (var address in nativeOverrides.RawTranslatedOverrides.Keys)
             rrTraits[address] = baseTraits[address];
+        // Excluded native functions are absent from activeBase, so BuildRetroTraits
+        // cannot recognize their native winner. An older resolved Retro profile
+        // may still list the translated body; never emit it into the immutable
+        // indirect table when the runtime registers a native replacement.
+        foreach (var address in nativeOverrides.TranslationExclusions)
+        {
+            if (!nativeOverrides.RawTranslatedOverrides.ContainsKey(address))
+                rrTraits.Remove(address);
+        }
         var sensitiveTargets = FindProfileSensitiveTargets(baseTraits, rrTraits);
         var sensitiveCallers = activeBase
             .Where(record => record.DirectCalls.Any(sensitiveTargets.Contains))

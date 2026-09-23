@@ -16,7 +16,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
 - new hand models : planned
 - fix character height : planned
 - fix black hand in front of HUD : planned
-- culling where the player look not kart orientation : planned
+- VR course object culling based on the player's view rather than the kart's direction: implemented in source; headset verification pending.
 - better motorcycle controls : planned
 - more vehicles visual steering wheel compatibility : planned
 - fix Bullet Bill gate vision : planned

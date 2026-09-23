@@ -94,5 +94,9 @@ template <> struct KnownNativeCpuCall<addr> { \
 
 MKW_KNOWN_NATIVE_CPU_CALL(0x800847C0u, nw4r__lyt__detail__DrawQuad_800847c0);
 MKW_KNOWN_NATIVE_CPU_CALL(0x80084D20u, nw4r__lyt__detail__DrawQuad_80084d20);
+// Frequent scene-gather visibility test. Call the VR wrapper directly; it
+// invokes the original translated function before extending a rejected box.
+extern "C" void IntersectAabbForVr(CpuContext* ctx);
+MKW_KNOWN_NATIVE_CPU_CALL(0x80086610u, IntersectAabbForVr);
 
 #undef MKW_KNOWN_NATIVE_CPU_CALL

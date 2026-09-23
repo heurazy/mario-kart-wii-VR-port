@@ -142,7 +142,7 @@ void PublishObservedCamera(uint64_t frame, uint32_t address) noexcept {
 void MkwVRInstrumentationInitialize() noexcept {
     MkwVRPolicySetAvailableBindings(
         MkwVRBindingSceneState | MkwVRBindingRaceCamera |
-        MkwVRBindingDrawClassification);
+        MkwVRBindingDrawClassification | MkwVRBindingCulling);
 }
 
 } // namespace mkw::vr

@@ -3,6 +3,7 @@
 #include "vr/mkw_vr_policy.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <mutex>
 
@@ -24,6 +25,7 @@ struct PolicyState {
 
 std::mutex g_policy_mutex;
 PolicyState g_policy;
+std::atomic<bool> g_expand_race_culling{false};
 
 uint32_t FloatBits(const float* value) noexcept {
     uint32_t bits = 0;
@@ -137,6 +139,12 @@ void ApplyPolicyMutation(Mutation&& mutation) noexcept {
     if (SelectStablePresentation(g_policy) != previous) {
         AdvanceSafetyGeneration(g_policy);
     }
+    // Culling runs during game simulation, before the separately published
+    // scene/camera observations necessarily have matching frame indices.
+    // The stable race state is the correct guard for this CPU-side superset.
+    g_expand_race_culling.store(
+        SelectStablePresentation(g_policy) == VRPresentationMode::ImmersiveRace,
+        std::memory_order_relaxed);
 }
 
 uint64_t MakeContentTag(const PolicyState& state, VRPresentationMode presentation) noexcept {
@@ -182,10 +190,10 @@ constexpr MkwVRHookPoint kHookPoints[] = {
     {0x8054F8E0u, "GameScreenEffectsMgr::CopyEFBToLensFlareTextures",
      MkwVRHookCapability::PostProcess,
      "Track EFB-dependent lens-flare capture separately from world geometry."},
-    {0x802278D0u, "EGG::Frustum::CalcMtxPerspective", MkwVRHookCapability::Culling,
-     "Future culling-frustum expansion point for head movement beyond the base camera."},
-    {0x80228180u, "EGG::Frustum::CopyToG3D", MkwVRHookCapability::Culling,
-     "Observe the frustum handed to NW4R without guessing EGG::Frustum fields."},
+    {0x80086610u, "nw4r::math::FRUSTUM::IntersectAABB_Ex", MkwVRHookCapability::Culling,
+     "Keep nearby course objects eligible when the HMD looks outside the kart camera frustum."},
+    {0x80787774u, "ClipInfoMgr::Update", MkwVRHookCapability::Culling,
+     "Keep nearby items and map objects visible outside the kart-facing clip planes."},
 };
 
 } // namespace
@@ -193,6 +201,7 @@ constexpr MkwVRHookPoint kHookPoints[] = {
 void MkwVRPolicyReset() noexcept {
     std::lock_guard<std::mutex> lock(g_policy_mutex);
     g_policy = PolicyState{};
+    g_expand_race_culling.store(false, std::memory_order_relaxed);
 }
 
 void MkwVRPolicyConfigure(const MkwVRPolicyConfig& config) noexcept {
@@ -274,6 +283,10 @@ MkwVRPolicySnapshot MkwVRPolicyGetSnapshot() noexcept {
     snapshot.content_tag = MakeContentTag(g_policy, snapshot.presentation);
     snapshot.display_content_tag = MakeContentTag(g_policy, SelectStablePresentation(g_policy));
     return snapshot;
+}
+
+bool MkwVRPolicyExpandRaceCulling() noexcept {
+    return g_expand_race_culling.load(std::memory_order_relaxed);
 }
 
 VRDrawClass MkwVRPolicyClassifyDraw(const MkwVRDrawObservation& draw) noexcept {

@@ -17,6 +17,10 @@ int main() {
     camera.view_from_world = {1,0,0,0,0,1,0,0,0,0,1,0};
     MkwVRPolicyPublishRaceCamera(camera);
     const auto race = MkwVRPolicyGetSnapshot();
+    if (!MkwVRPolicyExpandRaceCulling()) {
+        std::cerr << "Immersive race must enable the cheap culling gate\n";
+        return 1;
+    }
     detail::FrameDelivery delivery;
     delivery.Start(1, race.content_tag, 1);
     delivery.Complete(1);
@@ -27,7 +31,8 @@ int main() {
     const auto gap = MkwVRPolicyGetSnapshot();
     if (gap.presentation != VRPresentationMode::VirtualScreen ||
         gap.content_tag == gap.display_content_tag ||
-        !delivery.CanDisplay(gap.display_content_tag, 1)) {
+        !delivery.CanDisplay(gap.display_content_tag, 1) ||
+        !MkwVRPolicyExpandRaceCulling()) {
         std::cerr << "Incomplete guest observations must not blank the last completed race image\n";
         return 1;
     }
@@ -39,6 +44,10 @@ int main() {
         return 1;
     }
     MkwVRPolicySetSettingsVisible(true);
+    if (MkwVRPolicyExpandRaceCulling()) {
+        std::cerr << "Settings must restore the game's original culling\n";
+        return 1;
+    }
     const auto menu = MkwVRPolicyGetSnapshot();
     MkwVRPolicySetSettingsVisible(true);
     const auto menuAgain = MkwVRPolicyGetSnapshot();
